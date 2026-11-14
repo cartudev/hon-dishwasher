@@ -410,16 +410,18 @@ def inspect_profile(start_command: Any, program: dict[str, Any]) -> dict[str, An
 async def connect_device() -> tuple[Any, Any]:
     try:
         from pyhon import Hon
-    except ImportError:
-        raise AppError("No está instalado pyhOn. Ejecutá ./setup.sh.", "pyhon_missing")
+    except ImportError as error:
+        # Surface the real cause (which module failed) instead of swallowing it.
+        raise AppError(f"pyhOn import falló ({error.__class__.__name__}: {error}).", "pyhon_missing")
 
     config = read_config()
     password = get_secret(config["email"])
     try:
         hon = await Hon(config["email"], password).__aenter__()
-    except Exception:
+    except Exception as error:
         password = ""
-        raise AppError("hOn no permitió iniciar sesión o consultar el aparato.", "hon_connection_failed")
+        # Class only. pyhOn auth errors embed redirect URLs and response bodies.
+        raise AppError(f"hOn no permitió iniciar sesión ({error.__class__.__name__}).", "hon_connection_failed")
     password = ""
     target = SETTINGS["target"]
     matches = [
