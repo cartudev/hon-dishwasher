@@ -1,45 +1,47 @@
 # Candy dishwasher widget
 
-Widget de bandeja (Rune, ventana GPU nativa) para controlar un lavavajillas
-**Candy CF 6C4F1PS-12** vía la API de hOn, con el backend Python [pyhOn](https://github.com/home-assistant-libs/pyhOn).
+A system tray widget (Rune, native GPU window) for controlling a
+**Candy CF 6C4F1PS-12** dishwasher through the hOn API, with a Python
+[pyhOn](https://github.com/home-assistant-libs/pyhOn) backend.
 
-## Capturas
+## Screenshots
 
-| Inicio · ciclo en curso | Programa y opciones recordadas |
+| Home · cycle in progress | Program and remembered options |
 |---|---|
-| ![Inicio con ciclo en curso](docs/screenshots/inicio-ciclo.png) | ![Programa](docs/screenshots/programa.png) |
+| ![Home with cycle in progress](docs/screenshots/inicio-ciclo.png) | ![Program](docs/screenshots/programa.png) |
 
-| Revisión (requiere `INICIAR`) | Configuración | Detener (requiere `DETENER`) |
+| Review (requires `INICIAR`) | Settings | Stop (requires `DETENER`) |
 |---|---|---|
-| ![Revisión](docs/screenshots/revision.png) | ![Configuración](docs/screenshots/configuracion.png) | ![Detener](docs/screenshots/detener.png) |
+| ![Review](docs/screenshots/revision.png) | ![Settings](docs/screenshots/configuracion.png) | ![Stop](docs/screenshots/detener.png) |
 
-- Vive en la **bandeja del sistema**: icono con menú (Abrir, Actualizar, Configuración, Salir).
-- Ventana flotante **tipo widget**: altura por pantalla (se arrastra por los tres puntos ⋮).
-- **Autoinicio** con la sesión gráfica (systemd --user); cerrar la ventana no apaga la app.
-- Ningún ciclo se envía sin escribir **`INICIAR`** en la pantalla de revisión, y detener
-  exige **`DETENER`**; ambas van en tarea de fondo y nunca bloquean la interfaz.
-- Muestra el **tiempo restante** que el aparato reporta en cada consulta, descontado por
-  el reloj local (sin sincronía en vivo; `Actualizar` trae un valor fresco).
+- Lives in the **system tray**: icon with a menu (Open, Refresh, Settings, Quit).
+- Floating **widget-sized** window: height follows the content per screen.
+- **Autostart** with the graphical session (systemd --user); closing the window
+  keeps the app alive in the tray, `Escape` hides it back there.
+- Nothing is sent without typing **`INICIAR`** on the review screen, and stopping
+  requires **`DETENER`**; both run on a background task and never block the UI.
+- Shows the **remaining time** the appliance reported on its last query,
+  discounted by the local clock (no live sync; *Refresh* fetches a fresh value).
 
-## Instalar y ejecutar
+## Install and run
 
 ```bash
 cd hon-dishwasher-tui
-./install.sh   # clona Rune (vendor/), crea .venv, compila en release y activa el autoinicio
+./install.sh   # clones Rune (vendor/), creates .venv, builds release, enables autostart
 ```
 
-`install.sh` deja el servicio en `~/.config/systemd/user/hon-dishwasher.service`
-(queriendo `graphical-session.target`). Sin autoinicio, `./run.sh` abre solo la ventana.
+`install.sh` drops the service in `~/.config/systemd/user/hon-dishwasher.service`
+(wanting `graphical-session.target`). Without autostart, `./run.sh` just opens the
+window.
 
-El icono aparece donde haya **tray host**: waybar, KDE, la mayoría de las barras
-(GNOME necesita una extensión). Clic primario abre la ventana; secundario, el menú.
-**Escape** esconde la ventana de vuelta al tray (la app sigue viva en la bandeja).
+The icon shows up wherever a **tray host** runs: waybar, KDE, most bars (GNOME
+needs an extension). Primary click opens the window; secondary click opens the
+menu. `Escape` hides the window back to the tray.
 
-### Ventana flotante y tamaño
+### Floating window and sizing
 
-La ventana se declara con `app_id "hon-dishwasher"`. En niri conviene una regla que la
-haga flotar y abrir cerca de la bandeja (con esta regla niri la abre arriba a la derecha;
-después recuerda la posición que le des arrastrándola):
+The window declares `app_id "hon-dishwasher"`. On niri, a window rule makes it
+float and open near the tray (afterwards niri remembers where you dragged it):
 
 ```kdl
 window-rule {
@@ -49,17 +51,23 @@ window-rule {
 }
 ```
 
-El tamaño se ajusta **por pantalla** (Inicio 320, programa 390, revisión 430,
-configuración 365 de alto): Wayland no deja a winit redimensionarse a sí mismo con los
-estados del compositor, así que la app pide el alto por IPC de niri
-(`niri msg action set-window-height --id …`). Sin niri, queda el tamaño fijo inicial.
-Para arrastrar la ventana, agarrala por los **tres puntos (⋮)** de la esquina superior
-izquierda, o usá el drag de niri (Mod + arrastrar).
+The height follows the **content of each screen** (framework's
+`fit_content_height`). To make that work on Wayland the repo carries
+`patches/winit-request-inner-size.patch`, applied by `./setup.sh`:
 
-## Programas y opciones: `config/programs.json`
+1. winit's `request_inner_size` must not veto the resize over the `tiled` state
+   that niri sends for server-side decorations (`prefer-no-csd`).
+2. when the resize is client-initiated, niri applies the new geometry without a
+   configure; the runtime then takes its own viewport and surface in the same
+   step, instead of stretching the last buffer to the new size.
 
-Los programas del menú **no están atados en el código**: salen de
-[`config/programs.json`](config/programs.json), que es la base y el ejemplo por defecto:
+Drag the window by the **three dots** at the top-left (`El::window_drag`), or
+use your compositor's own drag (Mod + drag).
+
+## Programs and options: `config/programs.json`
+
+The menu programs are **not hard-coded**: they come from
+[`config/programs.json`](config/programs.json), the base and default example:
 
 ```json
 {
@@ -80,87 +88,103 @@ Los programas del menú **no están atados en el código**: salen de
 }
 ```
 
-Qué significa cada campo:
+What each field means:
 
-- **`target`**: tipo de aparato (`DW`, `WM`, `OV`...) y modelo (o parte del nombre) a controlar.
-- **`id`**: identificador interno (`[a-z0-9_-]+`).
-- **`label`**: nombre visible en la app.
-- **`aliases`**: cómo se llama ese programa en el esquema del API. El backend compara los
-  nombres normalizados de las categorías de `startProgram` contra estos alias; si no hay
-  exactamente una coincidencia, el programa se marca como no disponible (nunca se adivina).
-- **`required`**: opciones que **siempre se envían activadas** con ese programa. `key` es el
-  nombre del parámetro en el esquema (`extraDry`, `openDoor`, ...). Si el esquema actual no
-  expone o no acepta una opción, el programa se marca no disponible y no se puede enviar.
-- **`basket`**: `true` habilita media carga (superior/inferior) **solo si** el esquema expone
-  `diverterLevel` (1/2) y `halfLoad` (0/1) seteables para ese programa.
+- **`target`**: appliance type (`DW`, `WM`, `OV`...) and model (or part of the
+  name) to control.
+- **`id`**: internal identifier (`[a-z0-9_-]+`).
+- **`label`**: name shown in the app.
+- **`aliases`**: how the program is called in the API schema. The backend
+  compares the normalized names of `startProgram`'s categories against these
+  aliases; the **first declared alias wins** (the schema may carry localized
+  variants of the same program, e.g. `intensive` and `Intensivo`). If none
+  matches, the program shows as unavailable (nothing is guessed).
+- **`required`**: options **sent with that program**, each with a remembered
+  switch (default ON, persisted per option). A disabled option is sent
+  explicitly as `0`; if the schema pins it to `1`, the program shows as
+  unavailable. **Basket (half load) is never remembered**: it starts at
+  "no half load" every time.
+- **`basket`**: `true` enables half load (upper/lower basket) **only if** the
+  schema exposes settable `diverterLevel` (1/2) and `halfLoad` (0/1) for that
+  program.
 
-### Cómo generar opciones nuevas
+### Generating new options
 
-1. Consultá el esquema real de tu aparato (solo lectura, sin enviar nada):
+1. Inspect the appliance's real schema (read-only, sends nothing):
 
    ```bash
    .venv/bin/python src/backend.py inspect | jq .
+   .venv/bin/python scripts/schema.py attributes   # raw appliance parameters
    ```
 
-   En `profiles → <programa> → required` ves cada opción con `supported`/`pinned`, y en
-   `basket → choices` las medias carga disponibles. Las categorías de `startProgram` con sus
-   parámetros muestran qué `key`s existen (`extraDry`, `openDoor`, `halfLoad`, `diverterLevel`...).
+   Under `profiles → <program> → required` each option reports
+   `supported`/`pinned`/`enabled`, and `basket → choices` lists the available
+   half loads. `startProgram`'s categories with their parameters show which
+   `key`s exist (`extraDry`, `openDoor`, `halfLoad`, `diverterLevel`, ...).
 
-2. Agregá un objeto a `programs` con `id`, `label`, `aliases` (uno de ellos debe matchear la
-   categoría del API) y su lista de `required`.
+2. Add an object to `programs` with `id`, `label`, `aliases` (one of them must
+   match an API category) and its `required` list.
 
-3. Validá que cargue: `python -m unittest discover -s tests` (13 pruebas, incluidas las del
-   formato de configuración).
+3. Check it loads: `python -m unittest discover -s tests` (21 tests, including
+   the config format ones).
 
-Con ese mecanismo la app se puede llevar a **otros usos**: otro lavavajillas (cambiar
-`target`), o cualquier aparato del mismo ecosistema hOn (lavadora `WM`, horno `OV`, ...):
-todo lo que cambia es el `target` y los programas/opciones del JSON; el motor genérico
-resuelve disponibilidad, medio de carga y envío contra el esquema vivo.
+The same mechanism carries the app to **other appliances**: change `target`,
+and whatever programs/options the JSON declares — the generic engine resolves
+availability, half load and sending against the live schema. The backend CLI
+(JSON ops over stdin/stdout) is meant to be reusable by other front-ends, such
+as a mobile app.
 
-### Menú por defecto configurable
+### Configurable default menu
 
-El menú por defecto del repo se puede dejar **en configuración**: si existe
-`~/.config/hon-dishwasher/programs.json`, se usa en lugar del JSON del repo. Ahí podés
-agregar, quitar o reordenar programas sin tocar el proyecto. Si el override tiene un error
-de formato, la app lo reporta con el motivo exacto y no adivina.
+The repo's default menu can be overridden: if
+`~/.config/hon-dishwasher/programs.json` exists, it is used instead of the
+repo's JSON. Add, remove or reorder programs there without touching the
+project. If the override has a format error, the app reports the exact reason
+and never guesses.
 
-## Seguridad
+## Security
 
-- Credenciales locales: la contraseña va al **keyring del sistema** (`secret-tool`/libsecret);
-  en disco queda únicamente el correo (`~/.config/hon-dishwasher/config.json`, 0600).
-- La contraseña viaja por **stdin** del backend; nunca por argv, ni por el chat, ni a disco.
-- Antes de enviar, el backend revalida: control remoto listo, puerta cerrada, sin ciclo activo,
-  programa inequívoco y opciones realmente seteables. Cualquier condición fallida aborta.
+- Local credentials: the password goes to the **system keyring**
+  (`secret-tool`/libsecret); only the email is stored on disk
+  (`~/.config/hon-dishwasher/config.json`, 0600).
+- The password travels over the backend's **stdin**; never argv, never the chat,
+  never disk.
+- Before sending, the backend revalidates: remote control ready, door closed,
+  no active cycle, unambiguous program and actually settable options. Any
+  failed condition aborts.
 
-## Estructura
+## Layout
 
 ```
-src/main.rs     App Rune: tray, autoinicio, tareas de fondo, guarda INICIAR
-src/ui.rs       Las 4 pantallas (inicio, programa, revisión, configuración)
-src/state.rs    Estado de la app
-src/model.rs    Tipos serde del JSON del backend
-src/backend.rs  Subprocess Python → JSON
-src/backend.py  pyhOn: esquema genérico, keyring, inicio/consulta
-config/programs.json   Menú por defecto (ejemplo base, extensible)
-tests/          Pruebas del backend (13)
-vendor/rune/    Clon del framework (se crea con ./setup.sh)
+src/main.rs     Rune app: tray, autostart, background tasks, INICIAR/DETENER gates
+src/ui.rs       The 5 screens (home, program, review, settings, stop)
+src/state.rs    App state, per-screen sizing, countdown
+src/model.rs    serde types for the backend's JSON
+src/backend.rs  Python subprocess → JSON bridge
+src/backend.py  pyhOn: generic schema engine, keyring, start/stop/inspect
+config/programs.json   Default menu (base example, extensible)
+scripts/schema.py      Dumps startProgram / appliance attributes (read-only)
+tests/          Backend tests (21)
+vendor/rune/    Framework clone (created by ./setup.sh)
+patches/        Wayland fixes applied to the vendored winit + Rune
 ```
 
-## Desarrollo
+## Development
 
-Escenas headless para verificar UI sin aparato real (datos de ejemplo, nunca envían nada):
+Headless scenes to verify the UI without a real appliance (sample data, they
+send nothing):
 
 ```bash
-cargo run -- --snap snapshots/home.png --scene sample --at 1.0 --size 400x620
+cargo run -- --snap screenshots/home.png --scene sample --at 1.0 --size 460x389
 ```
 
-Escenas: `sample`, `profile`, `review`, `config`, `config-typed`.
+Scenes: `sample`, `cycle`, `profile`, `review`, `config`, `config-typed`, `stop`.
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -v   # backend
 cargo test                                          # framework (vendor)
 ```
 
-## Licencia
+## License
 
 [MIT](LICENSE)
