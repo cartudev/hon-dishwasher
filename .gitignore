@@ -7,3 +7,5 @@ target/
 vendor/
 node_modules/
 snapshots/
+*--size
+*--scene
