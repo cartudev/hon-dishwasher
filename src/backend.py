@@ -158,11 +158,16 @@ def shutil_which(name: str) -> str | None:
     return which(name)
 
 
+# True when the Secret Service tool exists: Linux keeps using it, everything else
+# goes through the keyring package. Tests flip this flag to pick the path.
+USE_SECRET_TOOL = shutil_which("secret-tool") is not None
+
+
 def credential_get(email: str) -> str:
     """Reads the password from the platform credential store: the Secret Service
     over secret-tool on Linux/secret-tool-capable systems, the `keyring` package
     (Windows Credential Manager, macOS Keychain, ...) everywhere else."""
-    if shutil_which("secret-tool"):
+    if USE_SECRET_TOOL:
         result = secret_tool("lookup", "service", SERVICE, "account", email)
         if result.returncode != 0 or not result.stdout:
             raise AppError("No encuentro la contraseña en el keyring. Abrí Configuración.", "secret_missing")
@@ -178,7 +183,7 @@ def credential_get(email: str) -> str:
 
 
 def credential_store(email: str, password: str) -> None:
-    if shutil_which("secret-tool"):
+    if USE_SECRET_TOOL:
         result = secret_tool(
             "store",
             "--label=Contraseña de hOn (Candy dishwasher)",
@@ -202,7 +207,7 @@ def credential_store(email: str, password: str) -> None:
 
 
 def credential_present(email: str) -> bool:
-    if shutil_which("secret-tool"):
+    if USE_SECRET_TOOL:
         result = secret_tool("lookup", "service", SERVICE, "account", email)
         return result.returncode == 0 and bool(result.stdout)
     try:

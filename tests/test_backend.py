@@ -275,6 +275,9 @@ class StoreCredentialsTests(unittest.TestCase):
     def setUp(self):
         self._original_secret_tool = backend.secret_tool
         self._original_stdin = backend.sys.stdin
+        self._original_use_secret_tool = backend.USE_SECRET_TOOL
+        self.addCleanup(setattr, backend, "USE_SECRET_TOOL", self._original_use_secret_tool)
+        backend.USE_SECRET_TOOL = True
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
