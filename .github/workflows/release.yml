@@ -15,6 +15,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Install linking dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
+
       - name: Clone Rune at the pinned dev rev
         run: |
           mkdir -p vendor
@@ -54,6 +57,7 @@ jobs:
             --verify-tag
 
   windows:
+    needs: linux
     runs-on: windows-latest
     continue-on-error: true
     steps:
