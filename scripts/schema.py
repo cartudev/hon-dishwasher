@@ -16,6 +16,14 @@ import backend  # noqa: E402
 async def main() -> None:
     hon, appliance = await backend.connect_device()
     try:
+        if len(sys.argv) > 1 and sys.argv[1] == "attributes":
+            parameters = (appliance.attributes or {}).get("parameters", {})
+            print("activity:", repr(appliance.attributes.get("activity")))
+            print("active:", repr(appliance.attributes.get("active")))
+            for key in sorted(parameters):
+                value = parameters[key]
+                print(f"{key} = {getattr(value, 'value', value)!r}")
+            return
         start = appliance.commands.get("startProgram")
         if start is None:
             print("no hay startProgram")

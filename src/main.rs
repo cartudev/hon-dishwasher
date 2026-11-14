@@ -82,6 +82,37 @@ fn poll(s: &mut State, clock: f64, tx: &mut Tx) -> bool {
     dirty
 }
 
+/// Guarda una elección recordada (opción ON/OFF o visibilidad de un ciclo) en el
+/// backend y muta el snapshot local al instante: la UI no espera al subprocess.
+fn apply_choice(s: &mut State, program: String, key: String, on: bool) {
+    let Some(snapshot) = s.snapshot.as_mut() else { return };
+    let Some(info) = snapshot.profiles.get_mut(&program) else { return };
+    if let Some(option) = info.required.iter_mut().find(|o| o.key == key) {
+        option.enabled = on;
+    }
+    let me = s.me.clone();
+    rune::task::spawn("hon-choice", move || {
+        let _ = backend::call(&["choice", "set", &program, &key, if on { "1" } else { "0" }], None);
+        let _ = me.wake();
+    })
+    .ok();
+}
+
+fn apply_visible(s: &mut State, program: String, visible: bool) {
+    let Some(snapshot) = s.snapshot.as_mut() else { return };
+    if visible {
+        snapshot.hidden.retain(|id| id != &program);
+    } else if !snapshot.hidden.iter().any(|h| h == &program) {
+        snapshot.hidden.push(program.clone());
+    }
+    let me = s.me.clone();
+    rune::task::spawn("hon-visible", move || {
+        let _ = backend::call(&["visible", "set", &program, if visible { "1" } else { "0" }], None);
+        let _ = me.wake();
+    })
+    .ok();
+}
+
 /// Detiene el ciclo en curso (tarea de fondo; el UI jamás espera la red).
 fn stop_cycle(s: &mut State) {
     if s.busy || s.confirmation.text.trim() != "DETENER" {
@@ -109,7 +140,8 @@ fn stop_cycle(s: &mut State) {
     .ok();
 }
 
-fn refresh(s: &mut State) {    if s.busy {
+fn refresh(s: &mut State) {
+    if s.busy {
         return;
     }
     s.busy = true;
@@ -270,6 +302,7 @@ fn main() {
                 s.status = "Cuenta hOn".to_string();
             }),
             ("config-typed", |s| {
+                s.snapshot = Some(model::sample());
                 s.screen = Screen::Config;
                 s.busy = false;
                 s.status = "Cuenta hOn".to_string();

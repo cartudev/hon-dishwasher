@@ -127,15 +127,24 @@ class BackendSchemaTests(unittest.TestCase):
             asyncio.run(backend.dispatch(["stop", "PARAR"]))
 
     def test_cycle_state_reports_running_and_remaining(self):
-        class Appliance(dict):
-            pass
-        appliance = Appliance({"machMode": "3", "remainingTime": "95", "prCode": "2", "doorStatus": "0"})
+        class Appliance:
+            def __init__(self, data, attributes):
+                self._data = data
+                self.attributes = attributes
+
+            def get(self, key, default=None):
+                return self._data.get(key, default)
+
+        appliance = Appliance(
+            {"machMode": "2", "remainingTimeMM": "74", "prCode": "2"},
+            {"active": True, "activity": {"attributes": {"programName": "INTENSIVE"}}},
+        )
         state = backend.cycle_state(appliance)
         self.assertTrue(state["running"])
-        self.assertEqual(state["remaining_time"], "95")
-        self.assertEqual(state["pr_code"], "2")
-        idle = backend.cycle_state(Appliance({"machMode": "1", "remainingTime": "0"}))
-        self.assertFalse(idle["running"])
+        self.assertEqual(state["remaining_time"], "74")
+        self.assertEqual(state["program"], "INTENSIVE")
+        idle = Appliance({"machMode": "1", "remainingTimeMM": "0"}, {"active": False, "activity": {}})
+        self.assertFalse(backend.cycle_state(idle)["running"])
 
 
 class ProgramsConfigTests(unittest.TestCase):
@@ -191,6 +200,52 @@ class ProgramsConfigTests(unittest.TestCase):
             backend.PROGRAMS_FILE = override
             with self.assertRaisesRegex(backend.AppError, "necesita label y aliases"):
                 backend.reload_settings()
+
+
+class ChoicesTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name) / "hon-dishwasher"
+        self._files = (backend.CHOICES_FILE, backend.PROGRAMS_FILE, backend.SETTINGS)
+        backend.CHOICES_FILE = root / "choices.json"
+        self.addCleanup(setattr, backend, "CHOICES_FILE", self._files[0])
+        self.addCleanup(setattr, backend, "PROGRAMS_FILE", self._files[1])
+        self.addCleanup(setattr, backend, "SETTINGS", self._files[2])
+
+    def test_options_default_on_and_persist(self):
+        self.assertTrue(backend.choice_enabled("intensive", "extraDry"))
+        backend.set_option_choice("intensive", "extraDry", False)
+        self.assertFalse(backend.choice_enabled("intensive", "extraDry"))
+        # Otras opciones y programas quedan en su default.
+        self.assertTrue(backend.choice_enabled("intensive", "openDoor"))
+        self.assertTrue(backend.choice_enabled("prewash", "openDoor"))
+        # Una opción que el programa no conoce se rechaza.
+        with self.assertRaisesRegex(backend.AppError, "Opción no admitida"):
+            backend.set_option_choice("intensive", "noExiste", False)
+
+    def test_disabled_option_that_cannot_be_turned_off_makes_program_unavailable(self):
+        program = backend.SETTINGS["programs"]["intensive"]
+        category = Category({
+            "intensive": Parameter(["0", "1"]),
+            "extraDry": Parameter(["1"], value="1", typology="fixed"),
+            "openDoor": Parameter(["0", "1"]),
+        })
+        backend.set_option_choice("intensive", "extraDry", False)
+        info = backend.inspect_profile(StartCommand({"intensive": category}), program)
+        self.assertFalse(info["available"])
+        self.assertIn("Extra Dry", info["reason"])
+        backend.set_option_choice("intensive", "extraDry", True)
+        info = backend.inspect_profile(StartCommand({"intensive": category}), program)
+        self.assertTrue(info["available"])
+
+    def test_program_visibility_roundtrip(self):
+        self.assertTrue(backend.program_visible("intensive"))
+        backend.set_program_visible("intensive", False)
+        self.assertFalse(backend.program_visible("intensive"))
+        self.assertTrue(backend.program_visible("prewash"))
+        backend.set_program_visible("intensive", True)
+        self.assertTrue(backend.program_visible("intensive"))
 
 
 class CacheTests(unittest.TestCase):

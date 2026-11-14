@@ -34,6 +34,9 @@ pub struct Snapshot {
     /// Orden de los programas según la configuración (`config/programs.json`).
     #[serde(rename = "profileOrder", default)]
     pub profile_order: Vec<String>,
+    /// Ciclos ocultos del inicio (elección recordada en el backend).
+    #[serde(default)]
+    pub hidden: Vec<String>,
     #[serde(default)]
     pub profiles: HashMap<String, ProfileInfo>,
     #[serde(default)]
@@ -71,6 +74,9 @@ pub struct RequiredOption {
     pub supported: bool,
     #[serde(default)]
     pub pinned: bool,
+    /// La opción viaja activada (elección recordada, default ON).
+    #[serde(default)]
+    pub enabled: bool,
     #[serde(default)]
     pub reason: String,
 }
@@ -111,6 +117,7 @@ pub fn sample() -> Snapshot {
                 label: (*label).to_string(),
                 supported: true,
                 pinned: false,
+                enabled: true,
                 reason: String::new(),
             })
             .collect::<Vec<_>>()
@@ -166,6 +173,7 @@ pub fn sample() -> Snapshot {
         door_status: Some("0".to_string()),
         machine_mode: Some("1".to_string()),
         profile_order: vec!["intensive".to_string(), "prewash".to_string()],
+        hidden: vec![],
         profiles,
         error: None,
         code: None,

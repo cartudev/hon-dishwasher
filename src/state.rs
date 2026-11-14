@@ -91,6 +91,21 @@ impl State {
             .and_then(|value| value.trim().parse::<u32>().ok())
     }
 
+    /// Ciclos visibles en el inicio (orden del backend, filtrando los ocultos).
+    pub fn visible_order(&self) -> Vec<String> {
+        let hidden = self.snapshot.as_ref().map(|s| s.hidden.clone()).unwrap_or_default();
+        self.program_order()
+            .into_iter()
+            .filter(|id| !hidden.iter().any(|h| h == id))
+            .collect()
+    }
+
+    pub fn program_visible(&self, id: &str) -> bool {
+        self.snapshot
+            .as_ref()
+            .is_some_and(|s| !s.hidden.iter().any(|h| h == id))
+    }
+
     pub fn snapshot_ready(&self) -> bool {
         self.snapshot.as_ref().is_some_and(|s| s.ok)
     }
@@ -149,7 +164,7 @@ pub fn screen_size(screen: Screen) -> (f32, f32) {
         Screen::Home => 320.0,
         Screen::Profile => 390.0,
         Screen::Review => 430.0,
-        Screen::Config => 365.0,
+        Screen::Config => 450.0,
         Screen::Stop => 340.0,
     };
     (460.0, height)

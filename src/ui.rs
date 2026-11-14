@@ -1,13 +1,17 @@
 //! Las cuatro pantallas: inicio, programa, revisión/confirmación y configuración.
 
 use rune::tok::{self, Theme, motion, radius, space, type_};
-use rune::{Color, Cx, El, ScrollSpec, Tx, col, el, row, text, text_input};
+use rune::Color;
+use rune::{Cx, El, ScrollSpec, Tx, col, el, row, text, text_input};
+use rune_kit::{Switch, Kit};
+use rune_theme_opencode;
 
 use crate::state::{self, Basket, Screen, State};
 
 pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     let dark = cx.system_dark();
     let t = tok::theme(dark);
+    let kit = rune_theme_opencode::kit(dark);
     let accent = tok::accent(0, dark);
     let model = s
         .snapshot
@@ -56,9 +60,9 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
                 .scroll(ScrollSpec { stick_bottom: false })
                 .child(match s.screen {
                     Screen::Home => home(s, t, accent),
-                    Screen::Profile => profile_screen(s, t, accent),
+                    Screen::Profile => profile_screen(s, t, accent, kit),
                     Screen::Review => review(s, t, accent),
-                    Screen::Config => config(s, t, accent),
+                    Screen::Config => config(s, t, accent, kit),
                     Screen::Stop => stop_screen(s, t, accent),
                 }),
         )
@@ -139,15 +143,18 @@ fn program_card(id: &str, s: &State, t: Theme, accent: Color) -> El {
 }
 
 fn cycle_card(s: &State, t: Theme, accent: Color) -> El {
-    let code = s
+    let label = s
         .snapshot
         .as_ref()
-        .and_then(|x| x.pr_code.clone())
-        .unwrap_or_else(|| "?".to_string());
-    let countdown = if s.countdown.is_empty() {
-        "Calculando el tiempo…".to_string()
-    } else {
+        .and_then(|x| x.program.clone())
+        .map(|name| name.to_uppercase())
+        .unwrap_or_else(|| format!("CICLO prCode {}", s.snapshot.as_ref().and_then(|x| x.pr_code.clone()).unwrap_or_else(|| "?".into())));
+    let countdown = if !s.countdown.is_empty() {
         s.countdown.clone()
+    } else if s.remaining_minutes().is_none() {
+        "El aparato no reporta el tiempo restante".to_string()
+    } else {
+        "Calculando el tiempo…".to_string()
     };
     col()
         .key("cycle-card")
@@ -163,7 +170,7 @@ fn cycle_card(s: &State, t: Theme, accent: Color) -> El {
                 .center_y()
                 .justify_between()
                 .child(text("CICLO EN CURSO").key("cycle-title").font(type_::SECTION).color(t.text_secondary))
-                .child(text(format!("prCode {code}")).key("cycle-code").font(type_::MONO_CAPTION).color(t.text_secondary)),
+                .child(text(label).key("cycle-code").font(type_::MONO_CAPTION).color(t.text_secondary)),
         )
         .child(text(countdown).key("cycle-count").font(type_::TITLE).color(accent))
         .child(
@@ -177,9 +184,10 @@ fn cycle_card(s: &State, t: Theme, accent: Color) -> El {
 
 fn home(s: &State, t: Theme, accent: Color) -> El {
     let ready = s.snapshot_ready();
+    let order = s.visible_order();
     let mut programs = col().key("programs").gap(space::S2);
-    for id in s.program_order() {
-        programs = programs.child(program_card(&id, s, t, accent));
+    for id in &order {
+        programs = programs.child(program_card(id, s, t, accent));
     }
     col()
         .key("home")
@@ -191,6 +199,11 @@ fn home(s: &State, t: Theme, accent: Color) -> El {
                 .child(
                     if s.running() {
                         cycle_card(s, t, accent)
+                    } else if ready && order.is_empty() {
+                        text("No hay ciclos visibles; activá alguno en Configuración.")
+                            .key("hint-empty")
+                            .font(type_::SECTION)
+                            .color(t.text_secondary)
                     } else {
                         text("Elegí un programa (no inicia nada)").key("hint").font(type_::SECTION).color(t.text_secondary)
                     },
@@ -232,13 +245,14 @@ fn field_shell(key: &'static str, input: El, t: Theme) -> El {
         .child(input)
 }
 
-fn required_rows(id: &str, s: &State, t: Theme, accent: Color) -> El {
+fn required_rows(id: &str, s: &State, t: Theme, accent: Color, kit: &Kit) -> El {
+    let _ = accent;
     let info = s.profile_info(id);
     let options = info.map(|i| i.required.as_slice()).unwrap_or(&[]);
     let mut list = col()
         .key("required")
         .gap(space::S1)
-        .child(text("OPCIONES REQUERIDAS (SE ENVIÁN ACTIVADAS)").key("req-title").font(type_::SECTION).color(t.text_secondary));
+        .child(text("OPCIONES RECORDADAS (SE ENVIÁN SEGÚN EL INTERRUPTOR)").key("req-title").font(type_::SECTION).color(t.text_secondary));
     if options.is_empty() {
         list = list.child(
             text("Actualizá el equipo para ver las opciones.")
@@ -248,7 +262,8 @@ fn required_rows(id: &str, s: &State, t: Theme, accent: Color) -> El {
         );
     }
     for option in options {
-        let ok = option.supported;
+        let on = option.enabled;
+        let (program, key) = (id.to_string(), option.key.clone());
         list = list.child(
             row()
                 .key(option.key.clone())
@@ -257,10 +272,12 @@ fn required_rows(id: &str, s: &State, t: Theme, accent: Color) -> El {
                 .justify_between()
                 .child(text(option.label.clone()).key("name").font(type_::BODY).color(t.text))
                 .child(
-                    text(if ok { "ON" } else { "NO DISPONIBLE" })
-                        .key("state")
-                        .font(type_::MONO_CAPTION)
-                        .color(if ok { accent } else { t.text_secondary }),
+                    Switch::new(on)
+                        .hide_label()
+                        .label(option.label.clone())
+                        .on_toggle_tx(move |st: &mut State, _| crate::apply_choice(st, program.clone(), key.clone(), !on))
+                        .build(kit)
+                        .key(format!("sw-{}", option.key)),
                 ),
         );
     }
@@ -316,7 +333,7 @@ fn basket_area(s: &State, t: Theme, accent: Color) -> El {
     area
 }
 
-fn profile_screen(s: &State, t: Theme, accent: Color) -> El {
+fn profile_screen(s: &State, t: Theme, accent: Color, kit: &Kit) -> El {
     let id = s.selected.clone();
     let info = s.profile_info(&id);
     let label = info.map(|i| i.label.clone()).unwrap_or_else(|| id.clone());
@@ -342,7 +359,7 @@ fn profile_screen(s: &State, t: Theme, accent: Color) -> El {
                 .child(text(format!("PROGRAMA — {label}")).key("ptitle").font(type_::BODY).color(t.text))
                 .child(text(detail).key("pdetail").w_full().wrap().font(type_::LABEL).color(t.text_secondary)),
         )
-        .child(required_rows(&id, s, t, accent))
+        .child(required_rows(&id, s, t, accent, kit))
         .child(basket_area(s, t, accent))
         .child(
             row()
@@ -367,7 +384,7 @@ fn review(s: &State, t: Theme, accent: Color) -> El {
     let label = info.map(|i| i.label.clone()).unwrap_or_else(|| id.clone());
     let remote_ready = s.snapshot.as_ref().is_some_and(|x| x.remote_ready);
     let options = info
-        .map(|i| i.required.iter().map(|o| o.label.clone()).collect::<Vec<_>>().join(" · "))
+        .map(|i| i.required.iter().filter(|o| o.enabled).map(|o| o.label.clone()).collect::<Vec<_>>().join(" · "))
         .unwrap_or_default();
     let code = info
         .and_then(|i| i.code.clone())
@@ -531,8 +548,45 @@ fn stop_screen(s: &State, t: Theme, accent: Color) -> El {
         )
 }
 
-fn config(s: &State, t: Theme, accent: Color) -> El {
+fn config(s: &State, t: Theme, accent: Color, kit: &Kit) -> El {
     let can_save = s.email.text.contains('@') && !s.password.text.is_empty();
+    let mut cycles = col().key("cycles").gap(space::S1);
+    cycles = cycles.child(
+        text("CICLOS EN EL INICIO")
+            .key("cycles-title")
+            .font(type_::SECTION)
+            .color(t.text_secondary),
+    );
+    for id in s.program_order() {
+        let info = s.profile_info(&id);
+        let visible = s.program_visible(&id);
+        let label = info.map(|i| i.label.clone()).unwrap_or_else(|| id.clone());
+        let moved_id = id.clone();
+        cycles = cycles.child(
+            row()
+                .key(format!("vis-{id}"))
+                .w_full()
+                .center_y()
+                .justify_between()
+                .child(text(label.clone()).key("name").font(type_::BODY).color(t.text))
+                .child(
+                    Switch::new(visible)
+                        .hide_label()
+                        .label(label)
+                        .on_toggle_tx(move |st: &mut State, _| crate::apply_visible(st, moved_id.clone(), !visible))
+                        .build(kit)
+                        .key(format!("swv-{id}")),
+                ),
+        );
+    }
+    if s.program_order().is_empty() {
+        cycles = cycles.child(
+            text("Disponible tras la primera consulta al aparato.")
+                .key("cycles-empty")
+                .font(type_::LABEL)
+                .color(t.text_secondary),
+        );
+    }
     col()
         .key("config")
         .gap(space::S3)
@@ -581,6 +635,7 @@ fn config(s: &State, t: Theme, accent: Color) -> El {
                     ),
                 ),
         )
+        .child(cycles)
         .child(
             row()
                 .key("config-actions")

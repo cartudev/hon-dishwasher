@@ -18,6 +18,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 PROGRAMS_FILE = CONFIG_DIR / "programs.json"
 DEFAULT_PROGRAMS_FILE = Path(__file__).resolve().parent.parent / "config" / "programs.json"
 CACHE_FILE = CONFIG_DIR / "last-inspect.json"
+CHOICES_FILE = CONFIG_DIR / "choices.json"
 ACTIVE_MACHINE_MODES = {"2", "3", "4", "5"}
 
 
@@ -313,9 +314,9 @@ def inspect_profile(start_command: Any, program: dict[str, Any]) -> dict[str, An
             "label": program["label"],
             "available": False,
             "code": None,
-            "reason": "El API no expone una categoría inequívoca para este programa.",
+            "reason": "El API no expone este programa en el esquema actual.",
             "required": [
-                {"key": option["key"], "label": option["label"], "supported": False, "pinned": False, "reason": "no_expuesto"}
+                {"key": option["key"], "label": option["label"], "supported": False, "pinned": False, "enabled": choice_enabled(program["id"], option["key"]), "reason": "no_expuesto"}
                 for option in program["required"]
             ],
             "basket": {"available": False, "choices": []},
@@ -325,8 +326,11 @@ def inspect_profile(start_command: Any, program: dict[str, Any]) -> dict[str, An
     required = []
     for option in program["required"]:
         state = parameter_state(params.get(option["key"]), "1")
-        required.append({"key": option["key"], "label": option["label"], **state})
-    missing = [option["label"] for option in required if not option["supported"]]
+        required.append({"key": option["key"], "label": option["label"], "enabled": choice_enabled(program["id"], option["key"]), **state})
+    # Disponibilidad y avisos solo sobre las opciones habilitadas; una opción
+    # deshabilitada debe poder ir a 0 para poder garantizar el apagado.
+    missing = [option["label"] for option in required if option["enabled"] and not option["supported"]]
+    stuck = [option["label"] for option in required if not option["enabled"] and not settable(params.get(option["key"]), "0")]
 
     diverter = params.get("diverterLevel")
     half_load = params.get("halfLoad")
@@ -339,9 +343,9 @@ def inspect_profile(start_command: Any, program: dict[str, Any]) -> dict[str, An
     return {
         "id": program["id"],
         "label": program["label"],
-        "available": not missing,
+        "available": not missing and not stuck,
         "code": code,
-        "reason": "" if not missing else "No disponibles: " + ", ".join(missing) + ".",
+        "reason": "" if not missing and not stuck else "No disponibles: " + ", ".join(missing + stuck) + ".",
         "required": required,
         "basket": {
             "available": bool(basket_choices),
@@ -380,6 +384,79 @@ async def connect_device() -> tuple[Any, Any]:
     return hon, matches[0]
 
 
+def load_choices() -> dict[str, Any]:
+    """Elecciones recordadas: opciones por programa (default ON) y ciclos visibles
+    en el inicio. La media carga NO se recuerda: vuelve a sin media carga siempre.
+    """
+    try:
+        data = json.loads(CHOICES_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    options = data.get("options")
+    if not isinstance(options, dict):
+        options = {}
+    hidden = data.get("hidden")
+    if not isinstance(hidden, list):
+        hidden = []
+    return {"options": options, "hidden": [str(program) for program in hidden]}
+
+
+def save_choices(choices: dict[str, Any]) -> None:
+    try:
+        CHOICES_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        temporary = CHOICES_FILE.with_suffix(".json.tmp")
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+            json.dump(choices, file, ensure_ascii=False)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, CHOICES_FILE)
+        os.chmod(CHOICES_FILE, 0o600)
+    except OSError:
+        pass
+
+
+def choice_enabled(program_id: str, key: str) -> bool:
+    options = load_choices()["options"]
+    for_program = options.get(program_id)
+    if not isinstance(for_program, dict):
+        return True
+    return bool(for_program.get(key, True))
+
+
+def set_option_choice(program_id: str, key: str, enabled: bool) -> dict[str, Any]:
+    if program_id not in SETTINGS["programs"]:
+        raise AppError("Programa no admitido por esta app.", "profile_invalid")
+    program = SETTINGS["programs"][program_id]
+    if not any(option["key"] == key for option in program["required"]):
+        raise AppError("Opción no admitida por este programa.", "option_invalid")
+    choices = load_choices()
+    for_program = choices["options"].get(program_id)
+    if not isinstance(for_program, dict):
+        for_program = {}
+        choices["options"][program_id] = for_program
+    for_program[key] = enabled
+    save_choices(choices)
+    return {"ok": True, "choices": choices}
+
+
+def set_program_visible(program_id: str, visible: bool) -> dict[str, Any]:
+    if program_id not in SETTINGS["programs"]:
+        raise AppError("Programa no admitido por esta app.", "profile_invalid")
+    choices = load_choices()
+    hidden = [program for program in choices["hidden"] if program != program_id]
+    if not visible:
+        hidden.append(program_id)
+    choices["hidden"] = hidden
+    save_choices(choices)
+    return {"ok": True, "choices": choices}
+
+
+def program_visible(program_id: str) -> bool:
+    return program_id not in load_choices()["hidden"]
+
+
 def live_state(appliance: Any) -> dict[str, Any]:
     start = appliance.commands.get("startProgram")
     remote = {
@@ -388,6 +465,12 @@ def live_state(appliance: Any) -> dict[str, Any]:
     }
     door = appliance.get("doorStatus", None)
     mode = appliance.get("machMode", None)
+    # El tiempo restante llega como remainingTimeMM (minutos); el detalle del ciclo
+    # enviado ("post del código") vive en attributes.activity.attributes.
+    activity = (appliance.attributes or {}).get("activity") or {}
+    activity_params = activity.get("attributes") or {}
+    remaining = appliance.get("remainingTimeMM", None)
+    program_name = activity_params.get("programName")
     profiles = {}
     for program_id in SETTINGS["order"]:
         program = SETTINGS["programs"][program_id]
@@ -413,34 +496,35 @@ def live_state(appliance: Any) -> dict[str, Any]:
         "remote_ready": all(remote.values()),
         "door_status": None if door is None else str(door),
         "machine_mode": None if mode is None else str(mode),
-        "running": mode is not None and str(mode) in ACTIVE_MACHINE_MODES,
-        "remaining_time": None if appliance.get("remainingTime", None) is None else str(appliance.get("remainingTime")),
+        # `active` lo calcula pyhon del bloque activity (CYCLE en curso).
+        "running": bool((appliance.attributes or {}).get("active")),
+        "remaining_time": None if remaining is None else str(remaining),
         "pr_code": None if appliance.get("prCode", None) is None else str(appliance.get("prCode")),
-        "program": None if appliance.get("program", None) is None else str(appliance.get("program")),
+        "program": None if not program_name else str(program_name),
         "profileOrder": list(SETTINGS["order"]),
         "profiles": profiles,
+        "choices": load_choices(),
     }
 
 
 def cycle_state(appliance: Any) -> dict[str, Any]:
-    """Estado liviano del ciclo: lo que empuja cada consulta."""
-    remote = {
-        key: bool_on(appliance.get(key, None))
-        for key in ("remoteCtrValid", "remoteActionable", "remoteVisible")
-    }
+    """Estado liviano del ciclo, con las mismas claves que publican las consultas."""
     mode = appliance.get("machMode", None)
-    remaining = appliance.get("remainingTime", None)
+    remaining = appliance.get("remainingTimeMM", appliance.get("remainingTime", None))
+    attributes = appliance.attributes or {}
+    activity = attributes.get("activity") or {}
+    activity_params = activity.get("attributes") or {}
+    program_name = activity_params.get("programName")
     return {
         "ok": True,
         "kind": "cycle",
         "machine_mode": None if mode is None else str(mode),
-        "running": mode is not None and str(mode) in ACTIVE_MACHINE_MODES,
-        "remote_ready": all(remote.values()),
+        "running": bool(attributes.get("active")) or (mode is not None and str(mode) in ACTIVE_MACHINE_MODES),
+        "remote_ready": bool_on(appliance.get("remoteCtrValid", None)),
         "door_status": None if appliance.get("doorStatus", None) is None else str(appliance.get("doorStatus")),
         "remaining_time": None if remaining is None else str(remaining),
-        "delay_time": None if appliance.get("delayTime", None) is None else str(appliance.get("delayTime")),
         "pr_code": None if appliance.get("prCode", None) is None else str(appliance.get("prCode")),
-        "program": None if appliance.get("program", None) is None else str(appliance.get("program")),
+        "program": None if not program_name else str(program_name),
     }
 
 
@@ -491,8 +575,11 @@ def check_start_preconditions(appliance: Any, program_id: str, basket: str) -> t
     params = getattr(category, "parameters", {}) or {}
     for option in program["required"]:
         parameter = params.get(option["key"])
-        if not allows(parameter, "1"):
-            raise AppError(f"El programa elegido no admite {option['label']}=1.", "required_option_unavailable")
+        if choice_enabled(program["id"], option["key"]):
+            if not allows(parameter, "1"):
+                raise AppError(f"El programa elegido no admite {option['label']}=1.", "required_option_unavailable")
+        elif not settable(parameter, "0"):
+            raise AppError(f"El programa no permite desactivar {option['label']} en su esquema actual.", "required_option_unavailable")
 
     diverter = params.get("diverterLevel")
     half_load = params.get("halfLoad")
@@ -574,7 +661,8 @@ async def start_program(program_id: str, basket: str) -> dict[str, Any]:
             if parameter is None:
                 raise AppError(f"El comando activo perdió la opción {option['key']}; no envié nada.", "schema_changed")
             if str(getattr(parameter, "typology", "")) != "fixed":
-                parameter.value = "1"
+                # Recordadas: habilitada = 1; deshabilitada = 0 explícito.
+                parameter.value = "1" if choice_enabled(program["id"], option["key"]) else "0"
 
         diverter = params.get("diverterLevel")
         half_load = params.get("halfLoad")
@@ -621,6 +709,19 @@ async def dispatch(args: list[str]) -> None:
         return
     if operation == "cached":
         emit(cached_inspect())
+        return
+    if operation == "choices":
+        emit({"ok": True, **load_choices()})
+        return
+    if operation == "choice":
+        if len(args) != 5 or args[1] != "set":
+            raise AppError("Operación de elección incompleta.", "usage")
+        emit(set_option_choice(args[2], args[3], args[4] == "1"))
+        return
+    if operation == "visible":
+        if len(args) != 4 or args[1] != "set":
+            raise AppError("Operación de visibilidad incompleta.", "usage")
+        emit(set_program_visible(args[2], args[3] == "1"))
         return
     if operation == "start":
         if len(args) != 4 or args[3] != "INICIAR":
