@@ -122,6 +122,21 @@ class BackendSchemaTests(unittest.TestCase):
         with self.assertRaisesRegex(backend.AppError, "Falta confirmación explícita"):
             asyncio.run(backend.dispatch(["start", "intensive", "off", "CANCELAR"]))
 
+    def test_stop_rejects_missing_explicit_confirmation(self):
+        with self.assertRaisesRegex(backend.AppError, "Falta confirmación explícita"):
+            asyncio.run(backend.dispatch(["stop", "PARAR"]))
+
+    def test_cycle_state_reports_running_and_remaining(self):
+        class Appliance(dict):
+            pass
+        appliance = Appliance({"machMode": "3", "remainingTime": "95", "prCode": "2", "doorStatus": "0"})
+        state = backend.cycle_state(appliance)
+        self.assertTrue(state["running"])
+        self.assertEqual(state["remaining_time"], "95")
+        self.assertEqual(state["pr_code"], "2")
+        idle = backend.cycle_state(Appliance({"machMode": "1", "remainingTime": "0"}))
+        self.assertFalse(idle["running"])
+
 
 class ProgramsConfigTests(unittest.TestCase):
     def setUp(self):

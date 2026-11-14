@@ -10,6 +10,7 @@ pub enum Screen {
     Profile,
     Review,
     Config,
+    Stop,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -49,6 +50,12 @@ pub struct State {
     pub confirmation: TextEdit,
     pub email: TextEdit,
     pub password: TextEdit,
+    /// Minutos restantes de la última consulta, sellados en el reloj local por `poll`.
+    pub remaining_min: Option<u32>,
+    /// Hay un dato de tiempo sin sellar (poll asigna `landed_at` en su próximo tick).
+    pub remaining_new: bool,
+    pub landed_at: f64,
+    pub countdown: String,
 }
 
 impl State {
@@ -64,7 +71,24 @@ impl State {
             confirmation: TextEdit::new(""),
             email: TextEdit::new(""),
             password: TextEdit::new(""),
+            remaining_min: None,
+            remaining_new: false,
+            landed_at: 0.0,
+            countdown: String::new(),
         }
+    }
+
+    /// El aparato reporta un ciclo activo.
+    pub fn running(&self) -> bool {
+        self.snapshot.as_ref().is_some_and(|s| s.running)
+    }
+
+    /// Minutos restantes de la última consulta, ya parseados.
+    pub fn remaining_minutes(&self) -> Option<u32> {
+        self.snapshot
+            .as_ref()
+            .and_then(|s| s.remaining_time.as_deref())
+            .and_then(|value| value.trim().parse::<u32>().ok())
     }
 
     pub fn snapshot_ready(&self) -> bool {
@@ -126,6 +150,7 @@ pub fn screen_size(screen: Screen) -> (f32, f32) {
         Screen::Profile => 390.0,
         Screen::Review => 430.0,
         Screen::Config => 365.0,
+        Screen::Stop => 340.0,
     };
     (460.0, height)
 }

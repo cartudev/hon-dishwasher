@@ -59,6 +59,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
                     Screen::Profile => profile_screen(s, t, accent),
                     Screen::Review => review(s, t, accent),
                     Screen::Config => config(s, t, accent),
+                    Screen::Stop => stop_screen(s, t, accent),
                 }),
         )
         .child(status_line(s, t, accent))
@@ -91,7 +92,7 @@ fn action(key: &'static str, label: &'static str, t: Theme, enabled: bool, prima
         .fill(if on { accent } else if enabled { t.card } else { t.control_off })
         .border(1.0, t.card_border)
         .hover(if enabled { t.hover } else { Color::TRANSPARENT })
-        .on_press_tx(move |s: &mut State, tx| if !s.busy { f(s, tx) })
+        .on_press_tx(move |s: &mut State, tx| f(s, tx))
         .child(
             text(label)
                 .key("label")
@@ -137,6 +138,43 @@ fn program_card(id: &str, s: &State, t: Theme, accent: Color) -> El {
         )
 }
 
+fn cycle_card(s: &State, t: Theme, accent: Color) -> El {
+    let code = s
+        .snapshot
+        .as_ref()
+        .and_then(|x| x.pr_code.clone())
+        .unwrap_or_else(|| "?".to_string());
+    let countdown = if s.countdown.is_empty() {
+        "Calculando el tiempo…".to_string()
+    } else {
+        s.countdown.clone()
+    };
+    col()
+        .key("cycle-card")
+        .gap(space::S1)
+        .padding(space::S3)
+        .fill(t.card)
+        .radius(radius::LG)
+        .border(1.0, t.card_border)
+        .child(
+            row()
+                .key("cycle-head")
+                .w_full()
+                .center_y()
+                .justify_between()
+                .child(text("CICLO EN CURSO").key("cycle-title").font(type_::SECTION).color(t.text_secondary))
+                .child(text(format!("prCode {code}")).key("cycle-code").font(type_::MONO_CAPTION).color(t.text_secondary)),
+        )
+        .child(text(countdown).key("cycle-count").font(type_::TITLE).color(accent))
+        .child(
+            row()
+                .key("cycle-actions")
+                .gap(space::S2)
+                .child(action("stop", "Detener ciclo…", t, true, false, accent, |s, tx| state::go(s, Screen::Stop, tx)))
+                .child(action("refresh", "Actualizar", t, true, false, accent, |s, _| crate::refresh(s))),
+        )
+}
+
 fn home(s: &State, t: Theme, accent: Color) -> El {
     let ready = s.snapshot_ready();
     let mut programs = col().key("programs").gap(space::S2);
@@ -146,7 +184,18 @@ fn home(s: &State, t: Theme, accent: Color) -> El {
     col()
         .key("home")
         .gap(space::S3)
-        .child(text("Elegí un programa (no inicia nada)").key("hint").font(type_::SECTION).color(t.text_secondary))
+        .child(
+            col()
+                .key("home-body")
+                .gap(space::S3)
+                .child(
+                    if s.running() {
+                        cycle_card(s, t, accent)
+                    } else {
+                        text("Elegí un programa (no inicia nada)").key("hint").font(type_::SECTION).color(t.text_secondary)
+                    },
+                ),
+        )
         .child(if ready {
             programs
         } else if s.busy {
@@ -401,6 +450,84 @@ fn review(s: &State, t: Theme, accent: Color) -> El {
                     },
                 ))
                 .child(action("start", "Iniciar ciclo", t, confirmed, true, accent, |s, _| crate::start_cycle(s))),
+        )
+}
+
+fn stop_screen(s: &State, t: Theme, accent: Color) -> El {
+    let code = s
+        .snapshot
+        .as_ref()
+        .and_then(|x| x.pr_code.clone())
+        .unwrap_or_else(|| "?".to_string());
+    let countdown = if s.countdown.is_empty() {
+        "Calculando el tiempo…".to_string()
+    } else {
+        s.countdown.clone()
+    };
+    let confirmed = s.confirmation.text.trim() == "DETENER";
+    col()
+        .key("stop")
+        .gap(space::S3)
+        .child(
+            text("DETENER — TODAVÍA NO SE ENVIÓ NADA")
+                .key("stitle")
+                .font(type_::SECTION)
+                .color(t.text_secondary),
+        )
+        .child(
+            col()
+                .key("stop-summary")
+                .padding(space::S3)
+                .gap(space::S1)
+                .fill(t.card)
+                .radius(radius::LG)
+                .border(1.0, t.card_border)
+                .child(text(countdown).key("stop-count").font(type_::TITLE).color(accent))
+                .child(text(format!("Ciclo prCode {code} en curso")).key("stop-cycle").font(type_::BODY).color(t.text)),
+        )
+        .child(
+            text("Al detener, hOn cancela el ciclo del aparato. Verificá que no haya vajilla enjuagada a medio hacer antes de confirmar.")
+                .key("swarn")
+                .w_full()
+                .wrap()
+                .font(type_::LABEL)
+                .color(t.text_secondary),
+        )
+        .child(
+            col()
+                .key("confirm-field")
+                .gap(4.0)
+                .child(
+                    text("Para habilitar la detención, escribí DETENER en el campo")
+                        .key("stop-label")
+                        .font(type_::LABEL)
+                        .color(t.text_secondary),
+                )
+                .child(
+                    field_shell(
+                        "confirm-shell",
+                        text_input(&s.confirmation, type_::BODY)
+                            .key("confirmation")
+                            .single_line()
+                            .w_full()
+                            .color(t.text)
+                            .label("Confirmación DETENER")
+                            .on_edit(|s: &mut State| &mut s.confirmation),
+                        t,
+                    ),
+                ),
+        )
+        .child(
+            row()
+                .key("stop-actions")
+                .gap(space::S2)
+                .child(
+                    action("back", "Volver", t, true, false, accent, |s, tx| {
+                        state::go(s, Screen::Home, tx);
+                        s.confirmation.clear();
+                    }),
+                )
+                .child(action("stop", "Detener ciclo", t, confirmed, true, accent, |s, _| crate::stop_cycle(s))),
         )
 }
 

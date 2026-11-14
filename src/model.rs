@@ -11,6 +11,16 @@ pub struct Snapshot {
     /// La respuesta viene del cache de la última consulta (la app avisa que esta actualizando).
     #[serde(default)]
     pub cached: bool,
+    /// Hay un ciclo activo (machMode 2-5).
+    #[serde(default)]
+    pub running: bool,
+    /// Minutos restantes que el aparato reporta (cadena del API).
+    #[serde(default)]
+    pub remaining_time: Option<String>,
+    #[serde(default)]
+    pub pr_code: Option<String>,
+    #[serde(default)]
+    pub program: Option<String>,
     #[serde(default)]
     pub model: String,
     #[serde(default)]
@@ -81,6 +91,16 @@ impl Snapshot {
     }
 }
 
+/// Datos de ejemplo con un ciclo en curso (escenas headless; nunca de un aparato real).
+pub fn sample_cycle() -> Snapshot {
+    Snapshot {
+        running: true,
+        remaining_time: Some("95".to_string()),
+        machine_mode: Some("3".to_string()),
+        ..sample()
+    }
+}
+
 /// Datos de ejemplo para las escenas headless (nunca de un aparato real).
 pub fn sample() -> Snapshot {
     let required = |labels: &[&str]| {
@@ -132,6 +152,10 @@ pub fn sample() -> Snapshot {
     Snapshot {
         ok: true,
         cached: false,
+        running: false,
+        remaining_time: None,
+        pr_code: Some("7".to_string()),
+        program: Some("Intensivo".to_string()),
         model: "CF 6C4F1PS-12".to_string(),
         remote_ready: true,
         remote: HashMap::from([

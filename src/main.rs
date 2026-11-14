@@ -26,6 +26,7 @@ fn inspect(me: rune::AppHandle<State>, with_cache: bool) {
                 me.update(move |s, tx| {
                     if s.snapshot.is_none() {
                         s.snapshot = Some(snapshot);
+                        s.remaining_new = true;
                         s.status = "Datos de la última consulta; actualizando en vivo…".to_string();
                         s.reconcile_selection();
                         tx.instant();
@@ -42,6 +43,7 @@ fn inspect(me: rune::AppHandle<State>, with_cache: bool) {
             match result {
                 Ok(snapshot) => {
                     s.snapshot = Some(snapshot);
+                    s.remaining_new = true;
                     s.status = "Equipo consultado · solo lectura".to_string();
                     s.reconcile_selection();
                 }
@@ -55,8 +57,59 @@ fn inspect(me: rune::AppHandle<State>, with_cache: bool) {
     });
 }
 
-fn refresh(s: &mut State) {
-    if s.busy {
+/// Conteo local: sella el reloj cuando aterriza un dato de tiempo y muestra los minutos
+/// que quedan, restando el paso del reloj (sin sincronía con hOn; el botón Actualizar
+/// trae un valor fresco).
+fn poll(s: &mut State, clock: f64, tx: &mut Tx) -> bool {
+    let mut dirty = false;
+    if s.remaining_new {
+        s.landed_at = clock;
+        s.remaining_new = false;
+        dirty = true;
+    }
+    if s.running() {
+        if let Some(minutes) = s.remaining_minutes() {
+            let left = (minutes as f64 * 60.0 - (clock - s.landed_at)).max(0.0);
+            let text = format!("Quedan {} min", (left / 60.0).ceil() as u32);
+            if text != s.countdown {
+                s.countdown = text;
+                dirty = true;
+            }
+        }
+        // Un despertar por minuto mantiene el conteo aunque la ventana esté quieta.
+        tx.wake_at(clock + 30.0);
+    }
+    dirty
+}
+
+/// Detiene el ciclo en curso (tarea de fondo; el UI jamás espera la red).
+fn stop_cycle(s: &mut State) {
+    if s.busy || s.confirmation.text.trim() != "DETENER" {
+        return;
+    }
+    s.busy = true;
+    s.status = "Preparando la detención…".to_string();
+    let me = s.me.clone();
+    rune::task::spawn("hon-stop", move || {
+        let result = backend::call(&["stop", "DETENER"], None);
+        let refresh = me.clone();
+        me.update(move |s, tx| {
+            s.busy = false;
+            s.confirmation.clear();
+            match result {
+                Ok(_) => {
+                    s.status = "hOn aceptó la detención del ciclo.".to_string();
+                    state::go(s, Screen::Home, tx);
+                    inspect(refresh, false);
+                }
+                Err(error) => s.status = error,
+            }
+        });
+    })
+    .ok();
+}
+
+fn refresh(s: &mut State) {    if s.busy {
         return;
     }
     s.busy = true;
@@ -95,6 +148,9 @@ fn start_cycle(s: &mut State) {
 }
 
 fn save_credentials(s: &mut State) {
+    if s.busy {
+        return;
+    }
     let email = s.email.text.trim().to_string();
     let password = s.password.text.clone();
     if !email.contains('@') || password.is_empty() {
@@ -134,6 +190,11 @@ fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     match s.screen {
         Screen::Review => {
             state::go(s, Screen::Profile, tx);
+            s.confirmation.clear();
+            true
+        }
+        Screen::Stop => {
+            state::go(s, Screen::Home, tx);
             s.confirmation.clear();
             true
         }
@@ -235,8 +296,24 @@ fn main() {
                 s.busy = false;
                 s.reconcile_selection();
             }),
+            ("cycle", |s| {
+                s.snapshot = Some(model::sample_cycle());
+                s.status = "Equipo consultado · solo lectura".to_string();
+                s.busy = false;
+                s.reconcile_selection();
+            }),
+            ("stop", |s| {
+                s.snapshot = Some(model::sample_cycle());
+                s.busy = false;
+                s.status = "Equipo consultado · solo lectura".to_string();
+                s.remaining_new = true;
+                s.reconcile_selection();
+                s.screen = Screen::Stop;
+                s.confirmation.clear();
+            }),
         ],
         on_key: Some(on_key),
+        poll: Some(poll),
         ..AppSpec::new("Candy — Lavavajillas", state::screen_size(Screen::Home), || unreachable!(), view)
     })
     // La ventana vive aparte del tray: cerrarla no apaga la app.

@@ -413,9 +413,55 @@ def live_state(appliance: Any) -> dict[str, Any]:
         "remote_ready": all(remote.values()),
         "door_status": None if door is None else str(door),
         "machine_mode": None if mode is None else str(mode),
+        "running": mode is not None and str(mode) in ACTIVE_MACHINE_MODES,
+        "remaining_time": None if appliance.get("remainingTime", None) is None else str(appliance.get("remainingTime")),
+        "pr_code": None if appliance.get("prCode", None) is None else str(appliance.get("prCode")),
+        "program": None if appliance.get("program", None) is None else str(appliance.get("program")),
         "profileOrder": list(SETTINGS["order"]),
         "profiles": profiles,
     }
+
+
+def cycle_state(appliance: Any) -> dict[str, Any]:
+    """Estado liviano del ciclo: lo que empuja cada consulta."""
+    remote = {
+        key: bool_on(appliance.get(key, None))
+        for key in ("remoteCtrValid", "remoteActionable", "remoteVisible")
+    }
+    mode = appliance.get("machMode", None)
+    remaining = appliance.get("remainingTime", None)
+    return {
+        "ok": True,
+        "kind": "cycle",
+        "machine_mode": None if mode is None else str(mode),
+        "running": mode is not None and str(mode) in ACTIVE_MACHINE_MODES,
+        "remote_ready": all(remote.values()),
+        "door_status": None if appliance.get("doorStatus", None) is None else str(appliance.get("doorStatus")),
+        "remaining_time": None if remaining is None else str(remaining),
+        "delay_time": None if appliance.get("delayTime", None) is None else str(appliance.get("delayTime")),
+        "pr_code": None if appliance.get("prCode", None) is None else str(appliance.get("prCode")),
+        "program": None if appliance.get("program", None) is None else str(appliance.get("program")),
+    }
+
+
+async def stop_program() -> dict[str, Any]:
+    hon, appliance = await connect_device()
+    try:
+        remote = {key: appliance.get(key, None) for key in ("remoteCtrValid", "remoteActionable", "remoteVisible")}
+        if not all(bool_on(value) for value in remote.values()):
+            raise AppError("El control remoto no está habilitado/listo en el aparato.", "remote_not_ready")
+        mode = appliance.get("machMode", None)
+        if mode is None or str(mode) not in ACTIVE_MACHINE_MODES:
+            raise AppError("El aparato no reporta un ciclo activo que detener.", "no_active_cycle")
+        command = appliance.commands.get("stopProgram")
+        if command is None:
+            raise AppError("El aparato no expone el comando stopProgram.", "stop_missing")
+        accepted = await command.send()
+        if not accepted:
+            raise AppError("hOn no aceptó el comando de detención.", "command_rejected")
+        return {"ok": True, "stopped": True}
+    finally:
+        await hon.__aexit__(None, None, None)
 
 
 def check_start_preconditions(appliance: Any, program_id: str, basket: str) -> tuple[Any, Any]:
@@ -580,6 +626,11 @@ async def dispatch(args: list[str]) -> None:
         if len(args) != 4 or args[3] != "INICIAR":
             raise AppError("Falta confirmación explícita; no envié ningún comando.", "confirmation_required")
         emit(await start_program(args[1], args[2]))
+        return
+    if operation == "stop":
+        if len(args) != 2 or args[1] != "DETENER":
+            raise AppError("Falta confirmación explícita; no envié ningún comando.", "confirmation_required")
+        emit(await stop_program())
         return
     raise AppError("Operación desconocida.", "usage")
 
