@@ -2,7 +2,7 @@
 
 A system tray widget (Rune, native GPU window) for controlling a
 **Candy CF 6C4F1PS-12** dishwasher through the hOn API, with a Python
-[pyhOn](https://github.com/home-assistant-libs/pyhOn) backend.
+[pyhOn](https://github.com/Andre0512/pyhOn) backend.
 
 ## Screenshots
 
