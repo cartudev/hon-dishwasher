@@ -10,11 +10,15 @@ if [ ! -d vendor/rune/.git ]; then
   echo "Rune clonado en vendor/rune"
 fi
 
-# Parche a nivel Wayland: request_inner_size no debe vetar el resize por el estado
-# tiled que niri manda por el decorado SSD (prefer-no-csd). Sin esto, el alto de la
-# ventana no sigue al contenido en ningún compositor con decorados del servidor.
+# Parches a nivel Wayland (estilo vendor-winit.patch de la casa Rune):
+# 1. winit: request_inner_size no debe vetar el resize por el estado tiled que niri
+#    manda por el decorado SSD (prefer-no-csd).
+# 2. rune: cuando el resize lo inicia el cliente, el runtime toma su viewport y su
+#    superficie en el mismo paso; niri aplica la geometría del cliente sin mandar un
+#    configure, así que el Resized esperado nunca llega y la superficie terminaba
+#    estirando el último buffer (clicks desplazados).
 if ! grep -qi "part of the veto" vendor/rune/vendor/winit/src/platform_impl/linux/wayland/window/state.rs 2>/dev/null; then
-  git -C vendor/rune apply "$PWD/patches/winit-request-inner-size.patch" && echo "Parche de winit aplicado"
+  git -C vendor/rune apply "$PWD/patches/winit-request-inner-size.patch" && echo "Parches de Wayland aplicados"
 fi
 
 if [ ! -x .venv/bin/python ]; then
