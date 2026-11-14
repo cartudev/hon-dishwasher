@@ -23,16 +23,42 @@ A system tray widget (Rune, native GPU window) for controlling a
 - Shows the **remaining time** the appliance reported on its last query,
   discounted by the local clock (no live sync; *Refresh* fetches a fresh value).
 
-## Install and run
+## Install
+
+### Linux (x86_64), one line
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cartudev/hon-dishwasher/main/packaging/bootstrap.sh | sh
+```
+
+It downloads the latest release to `~/.local/share/hon-dishwasher`, creates the
+Python environment (pyhOn) and enables the autostart service. Re-run it to
+update. Requirements: `python3` + `python3-venv`, a tray host (waybar, KDE,
+...) and `secret-tool` (libsecret) for the keyring.
+
+`libsecret` package names: Arch `libsecret`, Debian/Ubuntu
+`libsecret-1-0 libsecret-tools`, Fedora `libsecret`.
+
+### Windows (x86_64)
+
+Download
+[`hon-dishwasher-windows-x86_64.zip`](https://github.com/cartudev/hon-dishwasher/releases/latest/download/hon-dishwasher-windows-x86_64.zip)
+from the latest release, unpack it, create the venv
+(`python -m venv .venv && .venv\Scripts\pip install -r requirements.txt`) and
+run `run.bat`. Autostart: put a shortcut to `run.bat` in `shell:startup`.
+
+### Manual (any Linux)
+
+Grab the tarball from
+[releases/latest](https://github.com/cartudev/hon-dishwasher/releases/latest),
+unpack it and run the bundled `install.sh` (same steps as the bootstrap).
+
+### From source
 
 ```bash
 cd hon-dishwasher-tui
 ./install.sh   # clones Rune (vendor/), creates .venv, builds release, enables autostart
 ```
-
-`install.sh` drops the service in `~/.config/systemd/user/hon-dishwasher.service`
-(wanting `graphical-session.target`). Without autostart, `./run.sh` just opens the
-window.
 
 The icon shows up wherever a **tray host** runs: waybar, KDE, most bars (GNOME
 needs an extension). Primary click opens the window; secondary click opens the

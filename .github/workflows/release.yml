@@ -33,15 +33,14 @@ jobs:
 
       - name: Package
         run: |
-          version="${GITHUB_REF#refs/tags/}"
-          dir="hon-dishwasher-${version}"
+          dir="hon-dishwasher-linux"
           mkdir -p "dist/${dir}"
           cp target/release/hon-dishwasher "dist/${dir}/"
           cp -r src config "dist/${dir}/"
           cp requirements.txt packaging/install.sh "dist/${dir}/"
           cp README.md LICENSE "dist/${dir}/"
-          tar -C dist -czf "dist/${dir}.tar.gz" "${dir}"
-          echo "file=dist/${dir}.tar.gz" >> "$GITHUB_ENV"
+          tar -C dist -czf "dist/hon-dishwasher-linux-x86_64.tar.gz" "${dir}"
+          echo "file=dist/hon-dishwasher-linux-x86_64.tar.gz" >> "$GITHUB_ENV"
 
       - name: Release
         env:
@@ -79,18 +78,19 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          version="${GITHUB_REF#refs/tags/}"
-          dir="hon-dishwasher-${version}-windows"
+          dir="hon-dishwasher-windows"
           mkdir -p "dist/${dir}"
           cp target/release/hon-dishwasher.exe "dist/${dir}/"
           cp -r src config "dist/${dir}/"
           cp requirements.txt run.bat "dist/${dir}/"
           cp README.md LICENSE "dist/${dir}/"
-          cd dist && 7z a "${dir}.zip" "${dir}" && cd ..
-          echo "file=dist/${dir}.zip" >> "$GITHUB_ENV"
+          cd dist && 7z a "hon-dishwasher-windows-x86_64.zip" "${dir}" && cd ..
+          echo "file=dist/hon-dishwasher-windows-x86_64.zip" >> "$GITHUB_ENV"
 
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$version" "$file" --clobber
+        run: |
+          version="${GITHUB_REF#refs/tags/}"
+          gh release upload "$version" "$file" --clobber --repo "$GITHUB_REPOSITORY"
         shell: bash
