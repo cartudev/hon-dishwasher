@@ -8,6 +8,9 @@ use serde::Deserialize;
 pub struct Snapshot {
     #[serde(default)]
     pub ok: bool,
+    /// La respuesta viene del cache de la última consulta (la app avisa que esta actualizando).
+    #[serde(default)]
+    pub cached: bool,
     #[serde(default)]
     pub model: String,
     #[serde(default)]
@@ -128,6 +131,7 @@ pub fn sample() -> Snapshot {
     ]);
     Snapshot {
         ok: true,
+        cached: false,
         model: "CF 6C4F1PS-12".to_string(),
         remote_ready: true,
         remote: HashMap::from([

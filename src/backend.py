@@ -17,6 +17,7 @@ CONFIG_DIR = CONFIG_HOME / SERVICE
 CONFIG_FILE = CONFIG_DIR / "config.json"
 PROGRAMS_FILE = CONFIG_DIR / "programs.json"
 DEFAULT_PROGRAMS_FILE = Path(__file__).resolve().parent.parent / "config" / "programs.json"
+CACHE_FILE = CONFIG_DIR / "last-inspect.json"
 ACTIVE_MACHINE_MODES = {"2", "3", "4", "5"}
 
 
@@ -63,11 +64,12 @@ def validate_settings(data: Any, source: Path) -> dict[str, Any]:
             raise AppError(f"{source}: id de programa repetido ({program_id}).", "programs_invalid")
         if not label or not isinstance(aliases, list) or not aliases:
             raise AppError(f"{source}: {program_id} necesita label y aliases.", "programs_invalid")
-        normalized = {normalize(alias) for alias in aliases}
-        normalized.discard("")
-        if not normalized or (collides := normalized & seen_aliases):
+        normalized = [normalize(alias) for alias in aliases]
+        normalized = [alias for alias in normalized if alias]
+        normalized_list = list(dict.fromkeys(normalized))
+        if not normalized_list or (collides := set(normalized_list) & seen_aliases):
             raise AppError(f"{source}: alias repetido {sorted(collides)[0]!r} en {program_id}.", "programs_invalid")
-        seen_aliases |= normalized
+        seen_aliases |= set(normalized_list)
         if not isinstance(required, list):
             raise AppError(f"{source}: required de {program_id} debe ser una lista.", "programs_invalid")
         parsed_required = []
@@ -78,7 +80,8 @@ def validate_settings(data: Any, source: Path) -> dict[str, Any]:
         programs[program_id] = {
             "id": program_id,
             "label": label,
-            "aliases": normalized,
+            # En orden de declaración: el primero manda ante variantes del esquema.
+            "aliases": normalized_list,
             "required": parsed_required,
             "basket": bool(raw.get("basket", False)),
         }
@@ -287,14 +290,19 @@ def program_def(program_id: str) -> dict[str, Any]:
 
 def get_profile_category(start_command: Any, program: dict[str, Any]) -> tuple[str | None, Any | None]:
     categories = getattr(start_command, "categories", {}) or {}
-    matches = [
-        (str(code), category)
+    matches = {
+        normalize(code): (str(code), category)
         for code, category in categories.items()
         if normalize(code) in program["aliases"]
-    ]
-    if len(matches) != 1:
+    }
+    if not matches:
         return None, None
-    return matches[0]
+    # El esquema puede traer variantes localizadas del mismo programa (`intensive` y
+    # `Intensivo`, `prewash` y `Pre-lavado`); gana la del primer alias declarado.
+    for alias in program["aliases"]:
+        if alias in matches:
+            return matches[alias]
+    return next(iter(matches.values()))
 
 
 def inspect_profile(start_command: Any, program: dict[str, Any]) -> dict[str, Any]:
@@ -460,9 +468,37 @@ def check_start_preconditions(appliance: Any, program_id: str, basket: str) -> t
 async def inspect() -> dict[str, Any]:
     hon, appliance = await connect_device()
     try:
-        return live_state(appliance)
+        state = live_state(appliance)
+        save_cache(state)
+        return state
     finally:
         await hon.__aexit__(None, None, None)
+
+
+def save_cache(state: dict[str, Any]) -> None:
+    # Datos del aparato (sin credenciales): la app lista al instante en el próximo arranque.
+    try:
+        CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        temporary = CACHE_FILE.with_suffix(".json.tmp")
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as cache:
+            json.dump(state, cache, ensure_ascii=False)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, CACHE_FILE)
+        os.chmod(CACHE_FILE, 0o600)
+    except OSError:
+        pass
+
+
+def cached_inspect() -> dict[str, Any]:
+    try:
+        state = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raise AppError("Todavía no hay una consulta guardada.", "cache_missing")
+    if not isinstance(state, dict) or not state.get("ok"):
+        raise AppError("La consulta guardada no es válida.", "cache_invalid")
+    state["cached"] = True
+    return state
 
 
 async def start_program(program_id: str, basket: str) -> dict[str, Any]:
@@ -536,6 +572,9 @@ async def dispatch(args: list[str]) -> None:
         return
     if operation == "inspect":
         emit(await inspect())
+        return
+    if operation == "cached":
+        emit(cached_inspect())
         return
     if operation == "start":
         if len(args) != 4 or args[3] != "INICIAR":

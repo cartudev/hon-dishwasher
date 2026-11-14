@@ -12,9 +12,27 @@ use rune::{App, AppSpec, Key, KeyEvent, TextEdit, Tx};
 use state::{Basket, Screen, State};
 use ui::view;
 
-/// Consulta de solo lectura, ya en un hilo de tareas con el resultado aplicado al estado.
-fn inspect(me: rune::AppHandle<State>) {
+/// Caché de la última consulta + consulta en vivo. La lista aparece al instante con la
+/// caché y despues el estado fresco la reemplaza.
+fn inspect(me: rune::AppHandle<State>, with_cache: bool) {
     let _ = rune::task::spawn("hon-inspect", move || {
+        if with_cache {
+            let cached = backend::call(&["cached"], None).and_then(|value| {
+                serde_json::from_value::<model::Snapshot>(value)
+                    .map_err(|_| "El backend respondió en un formato inesperado.".to_string())
+            });
+            let snapshot = cached.into_iter().find(|s| s.ok && s.cached);
+            if let Some(snapshot) = snapshot {
+                me.update(move |s, tx| {
+                    if s.snapshot.is_none() {
+                        s.snapshot = Some(snapshot);
+                        s.status = "Datos de la última consulta; actualizando en vivo…".to_string();
+                        s.reconcile_selection();
+                        tx.instant();
+                    }
+                });
+            }
+        }
         let result = backend::call(&["inspect"], None).and_then(|value| {
             serde_json::from_value::<model::Snapshot>(value)
                 .map_err(|_| "El backend respondió en un formato inesperado.".to_string())
@@ -43,7 +61,7 @@ fn refresh(s: &mut State) {
     }
     s.busy = true;
     s.status = "Consultando el aparato (solo lectura)…".to_string();
-    inspect(s.me.clone());
+    inspect(s.me.clone(), false);
 }
 
 fn start_cycle(s: &mut State) {
@@ -68,7 +86,7 @@ fn start_cycle(s: &mut State) {
                     s.status = format!("hOn aceptó el inicio de {label}.");
                     state::go(s, Screen::Home, tx);
                     s.basket = Basket::Off;
-                    inspect(refresh);
+                    inspect(refresh, false);
                 }
                 Err(error) => s.status = error,
             }
@@ -98,7 +116,7 @@ fn save_credentials(s: &mut State) {
                 Ok(_) => {
                     s.status = "Credenciales guardadas en el keyring del sistema.".to_string();
                     state::go(s, Screen::Home, tx);
-                    inspect(refresh);
+                    inspect(refresh, false);
                 }
                 Err(error) => s.status = error,
             }
@@ -243,7 +261,7 @@ fn main() {
     let boot = app.handle();
     let _tray = build_tray(boot.clone());
     if !headless {
-        inspect(boot);
+        inspect(boot, true);
     }
     app.run();
 }

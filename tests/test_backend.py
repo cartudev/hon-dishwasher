@@ -75,6 +75,24 @@ class BackendSchemaTests(unittest.TestCase):
         self.assertFalse(info["available"])
         self.assertIn("Extra Dry", info["reason"])
 
+    def test_localized_variant_wins_by_declared_alias_order(self):
+        # El esquema trae `intensive` y `Intensivo` para el mismo programa: el primer
+        # alias declarado en programs.json elige la categoría.
+        program = backend.SETTINGS["programs"]["intensive"]
+        english = Category({"intensive": Parameter(["0", "1"]), "extraDry": Parameter(["0", "1"]), "openDoor": Parameter(["0", "1"])})
+        spanish = Category({"intensive": Parameter(["0", "1"]), "extraDry": Parameter(["0", "1"]), "openDoor": Parameter(["0", "1"])})
+        code, category = backend.get_profile_category(
+            StartCommand({"intensive": english, "Intensivo": spanish}), program
+        )
+        self.assertEqual(code, "intensive")
+
+        # Con el orden invertido en la config, gana la variante localizada.
+        reversed_program = dict(program, aliases=["intensivo", "intensive"])
+        code, _ = backend.get_profile_category(
+            StartCommand({"intensive": english, "Intensivo": spanish}), reversed_program
+        )
+        self.assertEqual(code, "Intensivo")
+
     def test_basket_choice_requires_both_half_load_and_diverter(self):
         program = backend.SETTINGS["programs"]["prewash"]
         category = Category({
@@ -158,6 +176,29 @@ class ProgramsConfigTests(unittest.TestCase):
             backend.PROGRAMS_FILE = override
             with self.assertRaisesRegex(backend.AppError, "necesita label y aliases"):
                 backend.reload_settings()
+
+
+class CacheTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        self.cache = root / "last-inspect.json"
+        self._original = backend.CACHE_FILE
+        backend.CACHE_FILE = self.cache
+        self.addCleanup(setattr, backend, "CACHE_FILE", self._original)
+
+    def test_cached_inspect_roundtrips_the_last_query(self):
+        state = {"ok": True, "model": "CF 6C4F1PS-12", "profiles": {}}
+        backend.save_cache(state)
+        info = backend.cached_inspect()
+        self.assertTrue(info["ok"])
+        self.assertTrue(info["cached"])
+        self.assertEqual(info["model"], "CF 6C4F1PS-12")
+
+    def test_cached_inspect_without_a_file_reports_clearly(self):
+        with self.assertRaisesRegex(backend.AppError, "no hay una consulta guardada"):
+            backend.cached_inspect()
 
 
 class StoreCredentialsTests(unittest.TestCase):
