@@ -74,11 +74,16 @@ pub struct RequiredOption {
     pub supported: bool,
     #[serde(default)]
     pub pinned: bool,
-    /// La opción viaja activada (elección recordada, default ON).
-    #[serde(default)]
+    /// La opción viaja activada (elección recordada, default ON). El default explícito
+    /// cubre cachés escritas antes de que existiera este campo.
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default)]
     pub reason: String,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 #[derive(Deserialize, Clone, Default)]

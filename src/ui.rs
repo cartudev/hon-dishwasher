@@ -19,7 +19,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         .map(|x| x.model.clone())
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| "CF 6C4F1PS-12".to_string());
-    col()
+    let window = col()
         .key("window")
         .w_full()
         .h_full()
@@ -66,7 +66,34 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
                     Screen::Stop => stop_screen(s, t, accent),
                 }),
         )
-        .child(status_line(s, t, accent))
+        .child(status_line(s, t, accent));
+    fit_window(s, cx);
+    window
+}
+
+/// La altura que pide niri se mide del contenido real (pantalla + header + estado más
+/// padding y separaciones), así que ninguna pantalla necesita una altura escrita a mano.
+fn fit_window(s: &State, cx: &mut Cx<State>) {
+    if s.headless {
+        return;
+    }
+    let screen_key = match s.screen {
+        Screen::Home => "home",
+        Screen::Profile => "profile",
+        Screen::Review => "review",
+        Screen::Config => "config",
+        Screen::Stop => "stop",
+    };
+    if let (Some([_, content]), Some([_, header]), Some([_, status])) =
+        (cx.layout_size(screen_key), cx.layout_size("header"), cx.layout_size("status"))
+    {
+        // py(S3) arriba y abajo + gap(S3) entre las tres filas.
+        let target = (content + header + status + space::S3 * 4.0).round();
+        if s.fitted.get() != Some(target) {
+            s.fitted.set(Some(target));
+            let _ = rune::task::spawn("hon-fit", move || state::niri_resize(target));
+        }
+    }
 }
 
 fn status_line(s: &State, t: Theme, accent: Color) -> El {
@@ -92,7 +119,7 @@ fn action(key: &'static str, label: &'static str, t: Theme, enabled: bool, prima
         .h(34.0)
         .px(space::S3)
         .center()
-        .radius(radius::MD)
+        .radius(17.0)
         .fill(if on { accent } else if enabled { t.card } else { t.control_off })
         .border(1.0, t.card_border)
         .hover(if enabled { t.hover } else { Color::TRANSPARENT })
@@ -238,7 +265,7 @@ fn field_shell(key: &'static str, input: El, t: Theme) -> El {
         .w_full()
         .h(40.0)
         .px(space::S3)
-        .radius(radius::MD)
+        .radius(20.0)
         .fill(t.card)
         .border(1.0, t.card_border)
         .center_y()
@@ -273,6 +300,7 @@ fn required_rows(id: &str, s: &State, t: Theme, accent: Color, kit: &Kit) -> El 
                 .child(text(option.label.clone()).key("name").font(type_::BODY).color(t.text))
                 .child(
                     Switch::new(on)
+                        .standard()
                         .hide_label()
                         .label(option.label.clone())
                         .on_toggle_tx(move |st: &mut State, _| crate::apply_choice(st, program.clone(), key.clone(), !on))
@@ -309,7 +337,7 @@ fn basket_area(s: &State, t: Theme, accent: Color) -> El {
                 .h(30.0)
                 .px(space::S3)
                 .center()
-                .radius(radius::MD)
+                .radius(15.0)
                 .fill(if on && allowed { accent } else { t.card })
                 .border(1.0, t.card_border)
                 .hover(if allowed { t.hover } else { Color::TRANSPARENT })
@@ -571,6 +599,7 @@ fn config(s: &State, t: Theme, accent: Color, kit: &Kit) -> El {
                 .child(text(label.clone()).key("name").font(type_::BODY).color(t.text))
                 .child(
                     Switch::new(visible)
+                        .standard()
                         .hide_label()
                         .label(label)
                         .on_toggle_tx(move |st: &mut State, _| crate::apply_visible(st, moved_id.clone(), !visible))

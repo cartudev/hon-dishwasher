@@ -1,5 +1,7 @@
 //! Estado de la app: pantalla activa, programa elegido, media carga y los campos de texto.
 
+use std::cell::Cell;
+
 use rune::{AppHandle, TextEdit, Tx};
 
 use crate::model::{ProfileInfo, Snapshot};
@@ -56,6 +58,10 @@ pub struct State {
     pub remaining_new: bool,
     pub landed_at: f64,
     pub countdown: String,
+    /// Última altura pedida por el ajuste al contenido (evita pedir lo mismo cada frame).
+    pub fitted: Cell<Option<f32>>,
+    /// Corrida de tooling headless: sin ventana real, no hay ajuste por IPC.
+    pub headless: bool,
 }
 
 impl State {
@@ -75,6 +81,10 @@ impl State {
             remaining_new: false,
             landed_at: 0.0,
             countdown: String::new(),
+            fitted: Cell::new(None),
+            headless: std::env::args().any(|argument| {
+                matches!(argument.as_str(), "--snap" | "--tree" | "--scene" | "--script" | "--video" | "--playground")
+            }),
         }
     }
 
