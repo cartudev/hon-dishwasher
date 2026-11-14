@@ -1,1 +1,4 @@
 pyhOn==0.17.5
+# Cross-platform credential store (Windows Credential Manager, macOS Keychain,
+# Secret Service on Linux). Linux keeps using secret-tool when available.
+keyring

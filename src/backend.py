@@ -12,7 +12,15 @@ from pathlib import Path
 from typing import Any
 
 SERVICE = "hon-dishwasher"
-CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+
+# Linux keeps the XDG layout; Windows/macOS use their own application-data folders.
+if sys.platform == "win32":
+    _CONFIG_BASE = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+elif sys.platform == "darwin":
+    _CONFIG_BASE = Path.home() / "Library" / "Application Support"
+else:
+    _CONFIG_BASE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+CONFIG_HOME = _CONFIG_BASE
 CONFIG_DIR = CONFIG_HOME / SERVICE
 CONFIG_FILE = CONFIG_DIR / "config.json"
 PROGRAMS_FILE = CONFIG_DIR / "programs.json"
@@ -150,11 +158,62 @@ def shutil_which(name: str) -> str | None:
     return which(name)
 
 
-def get_secret(email: str) -> str:
-    result = secret_tool("lookup", "service", SERVICE, "account", email)
-    if result.returncode != 0 or not result.stdout:
+def credential_get(email: str) -> str:
+    """Reads the password from the platform credential store: the Secret Service
+    over secret-tool on Linux/secret-tool-capable systems, the `keyring` package
+    (Windows Credential Manager, macOS Keychain, ...) everywhere else."""
+    if shutil_which("secret-tool"):
+        result = secret_tool("lookup", "service", SERVICE, "account", email)
+        if result.returncode != 0 or not result.stdout:
+            raise AppError("No encuentro la contraseña en el keyring. Abrí Configuración.", "secret_missing")
+        return result.stdout.rstrip("\n")
+    try:
+        import keyring
+    except ImportError:
+        raise AppError("No hay almacén de credenciales disponible (instalá keyring).", "keyring_missing")
+    password = keyring.get_password(SERVICE, email)
+    if not password:
         raise AppError("No encuentro la contraseña en el keyring. Abrí Configuración.", "secret_missing")
-    return result.stdout.rstrip("\n")
+    return password
+
+
+def credential_store(email: str, password: str) -> None:
+    if shutil_which("secret-tool"):
+        result = secret_tool(
+            "store",
+            "--label=Contraseña de hOn (Candy dishwasher)",
+            "service",
+            SERVICE,
+            "account",
+            email,
+            input_text=f"{password}\n",
+        )
+        if result.returncode != 0:
+            raise AppError("El keyring rechazó el guardado; no se guardó la cuenta.", "keyring_write_failed")
+        return
+    try:
+        import keyring
+    except ImportError:
+        raise AppError("No hay almacén de credenciales disponible (instalá keyring).", "keyring_missing")
+    try:
+        keyring.set_password(SERVICE, email, password)
+    except Exception:
+        raise AppError("El keyring rechazó el guardado; no se guardó la cuenta.", "keyring_write_failed")
+
+
+def credential_present(email: str) -> bool:
+    if shutil_which("secret-tool"):
+        result = secret_tool("lookup", "service", SERVICE, "account", email)
+        return result.returncode == 0 and bool(result.stdout)
+    try:
+        import keyring
+    except ImportError:
+        return False
+    return bool(keyring.get_password(SERVICE, email))
+
+
+def get_secret(email: str) -> str:
+    return credential_get(email)
 
 
 def save_config(email: str) -> None:
@@ -174,18 +233,7 @@ def save_config(email: str) -> None:
 
 
 def store_into_keyring(email: str, password: str) -> None:
-    result = secret_tool(
-        "store",
-        "--label=Contraseña de hOn (Candy dishwasher)",
-        "service",
-        SERVICE,
-        "account",
-        email,
-        input_text=f"{password}\n",
-    )
-    password = ""
-    if result.returncode != 0:
-        raise AppError("El keyring rechazó el guardado; no se guardó la cuenta.", "keyring_write_failed")
+    credential_store(email, password)
 
 
 def store_credentials() -> dict[str, Any]:
@@ -224,8 +272,7 @@ def config_status() -> dict[str, Any]:
         config = read_config()
     except AppError:
         return {"configured": False}
-    result = secret_tool("lookup", "service", SERVICE, "account", config["email"])
-    return {"configured": result.returncode == 0 and bool(result.stdout)}
+    return {"configured": credential_present(config["email"])}
 
 
 # --- Generic schema engine ----------------------------------------------------

@@ -188,3 +188,19 @@ cargo test                                          # framework (vendor)
 ## License
 
 [MIT](LICENSE)
+
+## Windows support
+
+The window, tray icon and render run on Windows out of the box (Rune targets
+wgpu/DX12 and `Shell_NotifyIcon`). The backend port is included:
+
+- credentials go to the **Windows Credential Manager** through the `keyring`
+  package (Linux keeps `secret-tool` when present);
+- configuration lives under **`%APPDATA%\hon-dishwasher`**;
+- the venv locator accepts `.venv\Scripts\python.exe`;
+- `run.bat` opens the window; autostart: put a shortcut to it in
+  `shell:startup`.
+
+Not yet packaged as an installer or a tray-only Windows build variant — the
+Linux `install.sh` flow is the polished one. Untested on real Windows: it is
+the mechanical port, CI for Windows is welcome.

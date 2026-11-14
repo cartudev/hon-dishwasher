@@ -29,7 +29,14 @@ fn locate() -> Option<(PathBuf, PathBuf)> {
         }
         let python = match std::env::var_os("HON_DISHWASHER_PYTHON") {
             Some(value) => PathBuf::from(value),
-            None => dir.join(".venv/bin/python"),
+            None => {
+                // Windows venvs put the interpreter under Scripts\.
+                if cfg!(windows) {
+                    dir.join(".venv").join("Scripts").join("python.exe")
+                } else {
+                    dir.join(".venv/bin/python")
+                }
+            }
         };
         return Some((python, script));
     }
