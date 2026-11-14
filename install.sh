@@ -8,7 +8,7 @@ export HON_DISHWASHER_PYTHON="$PWD/.venv/bin/python"
 cargo build --release --quiet
 echo "Binario: $PWD/target/release/hon-dishwasher"
 
-# Autoinicio: servicio de usuario que arranca con la sesión gráfica.
+# Autostart: user service that starts with the graphical session.
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 mkdir -p "$UNIT_DIR"
 cat > "$UNIT_DIR/hon-dishwasher.service" <<UNIT

@@ -8,13 +8,13 @@ use serde::Deserialize;
 pub struct Snapshot {
     #[serde(default)]
     pub ok: bool,
-    /// La respuesta viene del cache de la última consulta (la app avisa que esta actualizando).
+    /// The response comes from the last query's cache (the app says it is refreshing).
     #[serde(default)]
     pub cached: bool,
-    /// Hay un ciclo activo (machMode 2-5).
+    /// A cycle is active (machMode 2-5).
     #[serde(default)]
     pub running: bool,
-    /// Minutos restantes que el aparato reporta (cadena del API).
+    /// Remaining minutes the appliance reports (an API string).
     #[serde(default)]
     pub remaining_time: Option<String>,
     #[serde(default)]
@@ -31,10 +31,10 @@ pub struct Snapshot {
     pub door_status: Option<String>,
     #[serde(default)]
     pub machine_mode: Option<String>,
-    /// Orden de los programas según la configuración (`config/programs.json`).
+    /// Program order from the configuration (`config/programs.json`).
     #[serde(rename = "profileOrder", default)]
     pub profile_order: Vec<String>,
-    /// Ciclos ocultos del inicio (elección recordada en el backend).
+    /// Cycles hidden from the home screen (a choice remembered by the backend).
     #[serde(default)]
     pub hidden: Vec<String>,
     #[serde(default)]
@@ -57,7 +57,7 @@ pub struct ProfileInfo {
     pub code: Option<String>,
     #[serde(default)]
     pub reason: String,
-    /// Opciones requeridas, en el orden de la configuración, con sus rótulos.
+    /// Required options, in configuration order, with their labels.
     #[serde(default)]
     pub required: Vec<RequiredOption>,
     #[serde(default)]
@@ -74,8 +74,8 @@ pub struct RequiredOption {
     pub supported: bool,
     #[serde(default)]
     pub pinned: bool,
-    /// La opción viaja activada (elección recordada, default ON). El default explícito
-    /// cubre cachés escritas antes de que existiera este campo.
+    /// The option is sent enabled (a remembered choice, default ON). The explicit
+    /// default also covers caches written before this field existed.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default)]
@@ -102,7 +102,7 @@ impl Snapshot {
     }
 }
 
-/// Datos de ejemplo con un ciclo en curso (escenas headless; nunca de un aparato real).
+/// Sample data with a cycle in progress (headless scenes; never a real appliance).
 pub fn sample_cycle() -> Snapshot {
     Snapshot {
         running: true,
@@ -112,7 +112,7 @@ pub fn sample_cycle() -> Snapshot {
     }
 }
 
-/// Datos de ejemplo para las escenas headless (nunca de un aparato real).
+/// Sample data for the headless scenes (never a real appliance).
 pub fn sample() -> Snapshot {
     let required = |labels: &[&str]| {
         labels

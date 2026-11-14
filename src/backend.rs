@@ -1,5 +1,5 @@
-//! Puente con el backend Python (`src/backend.py`, pyhOn). Un proceso por operación, JSON por stdout.
-//! La contraseña nunca va por argv: la operación `store` la recibe por stdin.
+//! Bridge to the Python backend (`src/backend.py`, pyhOn). One process per operation, JSON over stdout.
+//! The password never travels over argv: the `store` operation reads it from stdin.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -12,7 +12,7 @@ const MISSING: &str = "Faltan dependencias. Desde la carpeta del proyecto ejecut
 
 fn locate() -> Option<(PathBuf, PathBuf)> {
     let mut dirs = Vec::new();
-    // target/debug/<exe> → tres ancestros arriba está la raíz del proyecto.
+    // target/debug/<exe> → three ancestors up is the project root.
     if let Ok(exe) = std::env::current_exe()
         && let Some(root) = exe.ancestors().nth(3)
     {
@@ -36,8 +36,8 @@ fn locate() -> Option<(PathBuf, PathBuf)> {
     None
 }
 
-/// Llama al backend y devuelve su JSON `ok: true`; cualquier otra cosa es un error
-/// con el mensaje seguro que el backend emite (sin datos del aparato ni de la cuenta).
+/// Calls the backend and returns its `ok: true` JSON; anything else is an error
+/// carrying the safe message the backend emits (no appliance or account data).
 pub fn call(args: &[&str], stdin_data: Option<String>) -> Result<Value, String> {
     let Some((python, script)) = locate() else {
         return Err(MISSING.to_string());

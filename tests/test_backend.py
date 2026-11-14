@@ -77,7 +77,7 @@ class BackendSchemaTests(unittest.TestCase):
 
     def test_localized_variant_wins_by_declared_alias_order(self):
         # El esquema trae `intensive` y `Intensivo` para el mismo programa: el primer
-        # alias declarado en programs.json elige la categoría.
+        # declared in programs.json picks the category.
         program = backend.SETTINGS["programs"]["intensive"]
         english = Category({"intensive": Parameter(["0", "1"]), "extraDry": Parameter(["0", "1"]), "openDoor": Parameter(["0", "1"])})
         spanish = Category({"intensive": Parameter(["0", "1"]), "extraDry": Parameter(["0", "1"]), "openDoor": Parameter(["0", "1"])})
@@ -220,7 +220,7 @@ class ChoicesTests(unittest.TestCase):
         # Otras opciones y programas quedan en su default.
         self.assertTrue(backend.choice_enabled("intensive", "openDoor"))
         self.assertTrue(backend.choice_enabled("prewash", "openDoor"))
-        # Una opción que el programa no conoce se rechaza.
+        # An option the program doesn't know is rejected.
         with self.assertRaisesRegex(backend.AppError, "Opción no admitida"):
             backend.set_option_choice("intensive", "noExiste", False)
 

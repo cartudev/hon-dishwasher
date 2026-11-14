@@ -14,9 +14,9 @@ fi
 # 1. winit: request_inner_size no debe vetar el resize por el estado tiled que niri
 #    manda por el decorado SSD (prefer-no-csd).
 # 2. rune: cuando el resize lo inicia el cliente, el runtime toma su viewport y su
-#    superficie en el mismo paso; niri aplica la geometría del cliente sin mandar un
-#    configure, así que el Resized esperado nunca llega y la superficie terminaba
-#    estirando el último buffer (clicks desplazados).
+#    surface in the same step; niri applies the client's geometry without sending a
+#    configure, so the expected Resized never arrives and the surface ended up
+#    stretching the last buffer (displaced clicks).
 if ! grep -qi "part of the veto" vendor/rune/vendor/winit/src/platform_impl/linux/wayland/window/state.rs 2>/dev/null; then
   git -C vendor/rune apply "$PWD/patches/winit-request-inner-size.patch" && echo "Parches de Wayland aplicados"
 fi

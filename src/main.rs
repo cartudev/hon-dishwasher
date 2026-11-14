@@ -1,6 +1,6 @@
 //! App Rune nativa (widget flotante con icono en la bandeja) para el lavavajillas
-//! Candy CF 6C4F1PS-12 vía hOn. Ninguna operación se envía sin la confirmación
-//! explícita "INICIAR" en la pantalla de revisión.
+//! Candy CF 6C4F1PS-12 dishwasher via hOn. No operation is sent without the
+//! explicit "INICIAR" confirmation on the review screen.
 
 mod backend;
 mod model;
@@ -12,8 +12,8 @@ use rune::{App, AppSpec, Key, KeyEvent, TextEdit, Tx};
 use state::{Basket, Screen, State};
 use ui::view;
 
-/// Caché de la última consulta + consulta en vivo. La lista aparece al instante con la
-/// caché y despues el estado fresco la reemplaza.
+/// Last query's cache + live query. The list shows instantly from the cache and
+/// the fresh state replaces it afterwards.
 fn inspect(me: rune::AppHandle<State>, with_cache: bool) {
     let _ = rune::task::spawn("hon-inspect", move || {
         if with_cache {
@@ -58,7 +58,7 @@ fn inspect(me: rune::AppHandle<State>, with_cache: bool) {
 }
 
 /// Conteo local: sella el reloj cuando aterriza un dato de tiempo y muestra los minutos
-/// que quedan, restando el paso del reloj (sin sincronía con hOn; el botón Actualizar
+/// left, discounted by the clock's passage (no live sync with hOn; the Refresh button
 /// trae un valor fresco).
 fn poll(s: &mut State, clock: f64, tx: &mut Tx) -> bool {
     let mut dirty = false;
@@ -76,14 +76,14 @@ fn poll(s: &mut State, clock: f64, tx: &mut Tx) -> bool {
                 dirty = true;
             }
         }
-        // Un despertar por minuto mantiene el conteo aunque la ventana esté quieta.
+        // A wake once a minute keeps the countdown going while the window sits idle.
         tx.wake_at(clock + 30.0);
     }
     dirty
 }
 
-/// Guarda una elección recordada (opción ON/OFF o visibilidad de un ciclo) en el
-/// backend y muta el snapshot local al instante: la UI no espera al subprocess.
+/// Persists a remembered choice (option ON/OFF or cycle visibility) in the
+/// backend and mutates the local snapshot at once: the UI never waits on the subprocess.
 fn apply_choice(s: &mut State, program: String, key: String, on: bool) {
     let Some(snapshot) = s.snapshot.as_mut() else { return };
     let Some(info) = snapshot.profiles.get_mut(&program) else { return };
@@ -113,7 +113,7 @@ fn apply_visible(s: &mut State, program: String, visible: bool) {
     .ok();
 }
 
-/// Detiene el ciclo en curso (tarea de fondo; el UI jamás espera la red).
+/// Stops the running cycle (background task; the UI never waits on the network).
 fn stop_cycle(s: &mut State) {
     if s.busy || s.confirmation.text.trim() != "DETENER" {
         return;
@@ -193,7 +193,7 @@ fn save_credentials(s: &mut State) {
     s.status = "Guardando en el keyring del sistema…".to_string();
     let me = s.me.clone();
     rune::task::spawn("hon-store", move || {
-        // Solo por stdin: nunca en argv, nunca en disco.
+        // Stdin only: never argv, never disk.
         let payload = serde_json::json!({ "email": email, "password": password });
         let result = backend::call(&["store"], Some(payload.to_string()));
         let refresh = me.clone();
@@ -213,12 +213,12 @@ fn save_credentials(s: &mut State) {
     .ok();
 }
 
-/// Escape vuelve atrás; la revisión descarta lo escrito para no dejar un INICIAR listo.
+/// Escape goes back; review discards what was typed so no INICIAR is left armed.
 fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     if event.key != Key::Escape {
         return false;
     }
-    // Escape vuelve atrás; desde el inicio, esconde la ventana al tray (la app sigue viva).
+    // Escape goes back; from the home screen it hides the window to the tray (the app stays alive).
     match s.screen {
         Screen::Review => {
             state::go(s, Screen::Profile, tx);
@@ -241,7 +241,7 @@ fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     }
 }
 
-/// Icono en la barra: clic abre la ventana; el menú da Abrir, Actualizar, Configuración y Salir.
+/// Tray icon: a click opens the window; the menu offers Open, Refresh, Settings and Quit.
 fn build_tray(handle: rune::AppHandle<State>) -> rune::Tray {
     let pixels = include_bytes!("../assets/icon.rgba").to_vec();
     let spec = TraySpec::new(
@@ -352,7 +352,7 @@ fn main() {
     // La ventana vive aparte del tray: cerrarla no apaga la app.
     .keep_running()
     // Widget flotante: el gestor de ventanas (niri incluido) la hace flotar y el alto
-    // sigue al contenido de cada pantalla (el ajuste del framework, vía winit).
+    // follows each screen's content (the framework's fit, via winit).
     .float_on_open()
     .fit_content_height()
     .window_options(rune::WindowOptions {

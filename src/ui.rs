@@ -1,4 +1,4 @@
-//! Las cuatro pantallas: inicio, programa, revisión/confirmación y configuración.
+//! The five screens: home, program, review/confirmation, settings and stop.
 
 use rune::tok::{self, Theme, motion, radius, space, type_};
 use rune::Color;
@@ -22,7 +22,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     let window = col()
         .key("window")
         .w_full()
-        // fit_content_height exige que la raíz no tenga altura fija ni fill: la mide
+        // fit_content_height requires a root without a fixed or fill height: it measures
         // del contenido. El fondo cubre igual con fill().
         .fill(t.bg)
         .px(space::S6)
@@ -34,8 +34,8 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
                 .gap(8.0)
                 .window_drag()
                 .child(
-                    // Puntos dibujados (sin texto): un texto es hit target y conservaría
-                    // el press, así que el grip no arrastraría.
+                    // Drawn dots (no text): text is a hit target and would keep the
+                    // press, so the grip would not drag.
                     col()
                         .key("drag-grip")
                         .gap(4.0)

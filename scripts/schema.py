@@ -1,7 +1,7 @@
-"""Vuelca el esquema de startProgram (solo lectura) para ajustar config/programs.json.
+"""Dumps the startProgram schema (read-only) to tune config/programs.json.
 
 Uso: .venv/bin/python scripts/schema.py [comando]
-Sin argumento muestra los comandos y, para startProgram, sus categorías y parámetros.
+With no argument it lists the commands and, for startProgram, its categories and parameters.
 """
 
 import asyncio
@@ -31,7 +31,7 @@ async def main() -> None:
         print(f"comando: startProgram")
         print(f"available_settings: {sorted(start.available_settings)}")
         for code, category in (getattr(start, "categories", {}) or {}).items():
-            print(f"\n== categoría {code!r} ({backend.normalize(code)!r})")
+            print(f"\n== category {code!r} ({backend.normalize(code)!r})")
             params = getattr(category, "parameters", {}) or {}
             for key, parameter in params.items():
                 typology = str(getattr(parameter, "typology", ""))

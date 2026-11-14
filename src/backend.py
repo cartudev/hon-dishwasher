@@ -37,7 +37,7 @@ def normalize(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "", text.lower())
 
 
-# --- Configuración de programas (la base extensible) -------------------------
+# --- Program configuration (the extensible base) ------------------------------
 
 
 def validate_settings(data: Any, source: Path) -> dict[str, Any]:
@@ -81,7 +81,7 @@ def validate_settings(data: Any, source: Path) -> dict[str, Any]:
         programs[program_id] = {
             "id": program_id,
             "label": label,
-            # En orden de declaración: el primero manda ante variantes del esquema.
+            # In declaration order: the first alias wins over schema variants.
             "aliases": normalized_list,
             "required": parsed_required,
             "basket": bool(raw.get("basket", False)),
@@ -95,7 +95,7 @@ def validate_settings(data: Any, source: Path) -> dict[str, Any]:
 
 
 def load_settings() -> dict[str, Any]:
-    # El override del usuario manda si existe; si está roto, se informa y no se adivina.
+    # The user's override wins when present; if broken, report it and never guess.
     source = PROGRAMS_FILE if PROGRAMS_FILE.is_file() else DEFAULT_PROGRAMS_FILE
     try:
         data = json.loads(source.read_text(encoding="utf-8"))
@@ -189,7 +189,7 @@ def store_into_keyring(email: str, password: str) -> None:
 
 
 def store_credentials() -> dict[str, Any]:
-    # La contraseña llega por stdin (JSON) desde la app Rune, nunca por argv ni por disco.
+    # The password arrives over stdin (JSON) from the Rune app, never argv nor disk.
     try:
         payload = json.loads(sys.stdin.read())
     except json.JSONDecodeError:
@@ -228,7 +228,7 @@ def config_status() -> dict[str, Any]:
     return {"configured": result.returncode == 0 and bool(result.stdout)}
 
 
-# --- Motor genérico de esquema -----------------------------------------------
+# --- Generic schema engine ----------------------------------------------------
 
 
 def bool_on(value: Any) -> bool:
@@ -327,7 +327,7 @@ def inspect_profile(start_command: Any, program: dict[str, Any]) -> dict[str, An
     for option in program["required"]:
         state = parameter_state(params.get(option["key"]), "1")
         required.append({"key": option["key"], "label": option["label"], "enabled": choice_enabled(program["id"], option["key"]), **state})
-    # Disponibilidad y avisos solo sobre las opciones habilitadas; una opción
+    # Availability and notices only over enabled options; a disabled one must
     # deshabilitada debe poder ir a 0 para poder garantizar el apagado.
     missing = [option["label"] for option in required if option["enabled"] and not option["supported"]]
     stuck = [option["label"] for option in required if not option["enabled"] and not settable(params.get(option["key"]), "0")]
@@ -385,8 +385,9 @@ async def connect_device() -> tuple[Any, Any]:
 
 
 def load_choices() -> dict[str, Any]:
-    """Elecciones recordadas: opciones por programa (default ON) y ciclos visibles
-    en el inicio. La media carga NO se recuerda: vuelve a sin media carga siempre.
+    """Remembered choices: per-program option switches (default ON) and which
+    cycles show on the home screen. Half load is NEVER remembered: it always
+    resets to no half load.
     """
     try:
         data = json.loads(CHOICES_FILE.read_text(encoding="utf-8"))
@@ -466,7 +467,7 @@ def live_state(appliance: Any) -> dict[str, Any]:
     door = appliance.get("doorStatus", None)
     mode = appliance.get("machMode", None)
     # El tiempo restante llega como remainingTimeMM (minutos); el detalle del ciclo
-    # enviado ("post del código") vive en attributes.activity.attributes.
+    # sent (the cycle's fingerprint) lives in attributes.activity.attributes.
     activity = (appliance.attributes or {}).get("activity") or {}
     activity_params = activity.get("attributes") or {}
     remaining = appliance.get("remainingTimeMM", None)
@@ -508,7 +509,7 @@ def live_state(appliance: Any) -> dict[str, Any]:
 
 
 def cycle_state(appliance: Any) -> dict[str, Any]:
-    """Estado liviano del ciclo, con las mismas claves que publican las consultas."""
+    """Light cycle state, with the same keys the queries publish."""
     mode = appliance.get("machMode", None)
     remaining = appliance.get("remainingTimeMM", appliance.get("remainingTime", None))
     attributes = appliance.attributes or {}
@@ -609,7 +610,7 @@ async def inspect() -> dict[str, Any]:
 
 
 def save_cache(state: dict[str, Any]) -> None:
-    # Datos del aparato (sin credenciales): la app lista al instante en el próximo arranque.
+    # Appliance data (no credentials): the app lists instantly on the next start.
     try:
         CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
         temporary = CACHE_FILE.with_suffix(".json.tmp")
@@ -661,7 +662,7 @@ async def start_program(program_id: str, basket: str) -> dict[str, Any]:
             if parameter is None:
                 raise AppError(f"El comando activo perdió la opción {option['key']}; no envié nada.", "schema_changed")
             if str(getattr(parameter, "typology", "")) != "fixed":
-                # Recordadas: habilitada = 1; deshabilitada = 0 explícito.
+                # Remembered choices: enabled = 1; disabled = explicit 0.
                 parameter.value = "1" if choice_enabled(program["id"], option["key"]) else "0"
 
         diverter = params.get("diverterLevel")

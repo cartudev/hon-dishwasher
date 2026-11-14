@@ -41,7 +41,7 @@ impl Basket {
 pub struct State {
     pub me: AppHandle<State>,
     pub screen: Screen,
-    /// Id del programa elegido (viene de `config/programs.json`).
+    /// The chosen program's id (from `config/programs.json`).
     pub selected: String,
     pub basket: Basket,
     pub busy: bool,
@@ -50,9 +50,9 @@ pub struct State {
     pub confirmation: TextEdit,
     pub email: TextEdit,
     pub password: TextEdit,
-    /// Minutos restantes de la última consulta, sellados en el reloj local por `poll`.
+    /// Remaining minutes from the last query, stamped on the local clock by `poll`.
     pub remaining_min: Option<u32>,
-    /// Hay un dato de tiempo sin sellar (poll asigna `landed_at` en su próximo tick).
+    /// An un-stamped time datum (poll assigns `landed_at` on its next tick).
     pub remaining_new: bool,
     pub landed_at: f64,
     pub countdown: String,
@@ -78,12 +78,12 @@ impl State {
         }
     }
 
-    /// El aparato reporta un ciclo activo.
+    /// The appliance reports an active cycle.
     pub fn running(&self) -> bool {
         self.snapshot.as_ref().is_some_and(|s| s.running)
     }
 
-    /// Minutos restantes de la última consulta, ya parseados.
+    /// Remaining minutes from the last query, already parsed.
     pub fn remaining_minutes(&self) -> Option<u32> {
         self.snapshot
             .as_ref()
@@ -91,7 +91,7 @@ impl State {
             .and_then(|value| value.trim().parse::<u32>().ok())
     }
 
-    /// Ciclos visibles en el inicio (orden del backend, filtrando los ocultos).
+    /// Cycles visible on the home screen (backend order, hidden ones filtered out).
     pub fn visible_order(&self) -> Vec<String> {
         let hidden = self.snapshot.as_ref().map(|s| s.hidden.clone()).unwrap_or_default();
         self.program_order()
@@ -136,7 +136,7 @@ impl State {
         self.screen = Screen::Profile;
     }
 
-    /// Al aterrizar una consulta, el programa elegido debe existir; si no, el primero.
+    /// When a query lands, the chosen program must exist; otherwise the first one.
     pub fn reconcile_selection(&mut self) {
         let order = self.program_order();
         if !order.is_empty() && !order.iter().any(|id| *id == self.selected) {
@@ -156,9 +156,9 @@ impl State {
     }
 }
 
-/// Altura natural de cada pantalla (ancho 460): el resize del framework no aplica en
-/// Wayland (winit rechaza `request_inner_size` con los estados del compositor), así que
-/// el tamaño lo fija niri por IPC sobre nuestra ventana.
+/// Natural height per screen (460 wide): kept as the initial window size only;
+/// live sizing comes from the framework's fit (see the Wayland patch in patches/).
+
 pub fn screen_size(screen: Screen) -> (f32, f32) {
     let height = match screen {
         Screen::Home => 320.0,
@@ -170,10 +170,10 @@ pub fn screen_size(screen: Screen) -> (f32, f32) {
     (460.0, height)
 }
 
-/// Cambia de pantalla; el alto lo sigue `fit_content_height` del framework.
-/// `instant` aterriza el cambio y su ajuste de alto sin resorte: durante la
-/// transición el dibujado y el hit-test se desfasaban un frame y los clicks
-/// caían desplazados ("más arriba") justo al entrar a programa/configuración.
+/// Switches screens; the height follows the framework's `fit_content_height`.
+/// `instant` lands the change and its height fit without a spring: during the
+/// transition the drawn layout and the hit test disagreed by a frame and clicks
+/// landed displaced ("above") right when entering program/settings.
 pub fn go(s: &mut State, screen: Screen, tx: &mut Tx) {
     s.screen = screen;
     if screen == Screen::Review {
@@ -182,8 +182,8 @@ pub fn go(s: &mut State, screen: Screen, tx: &mut Tx) {
     tx.instant();
 }
 
-/// Fija la altura de nuestra ventana en niri (busca el id por PID; reintenta porque
-/// la ventana puede estar mapeándose todavía). Sin niri, queda en silencio.
-/// Reabierta la ventana desde la bandeja, el framework re-ajusta el alto al contenido
-/// (build_for_show de `fit_content_height`); nada que hacer desde acá.
+/// Reopened from the tray, the framework re-fits the height to the content
+/// (`build_for_show` of `fit_content_height`); nothing to do from here.
+
+
 pub fn reapply_size(_s: &State) {}
