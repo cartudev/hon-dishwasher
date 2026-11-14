@@ -1,0 +1,20 @@
+diff --git a/vendor/winit/src/platform_impl/linux/wayland/window/state.rs b/vendor/winit/src/platform_impl/linux/wayland/window/state.rs
+index 1ef7a06..5b6ee93 100644
+--- a/vendor/winit/src/platform_impl/linux/wayland/window/state.rs
++++ b/vendor/winit/src/platform_impl/linux/wayland/window/state.rs
+@@ -669,8 +669,14 @@ impl WindowState {
+     }
+ 
+     /// Try to resize the window when the user can do so.
++    ///
++    /// The resize applies unless the compositor strictly owns the size (maximized or
++    /// fullscreen). The tiled state is NOT part of the veto: niri with `prefer-no-csd`
++    /// sets it on floating windows just to give them server-side decorations (and other
++    /// compositors re-configure tiled windows on the next commit anyway), which would
++    /// otherwise make `request_inner_size` a silent no-op for fit-to-content apps.
+     pub fn request_inner_size(&mut self, inner_size: Size) -> PhysicalSize<u32> {
+-        if self.last_configure.as_ref().map(Self::is_stateless).unwrap_or(true) {
++        if self.last_configure.as_ref().map(|configure| !configure.is_maximized() && !configure.is_fullscreen()).unwrap_or(true) {
+             self.resize(inner_size.to_logical(self.scale_factor()))
+         }
+ 

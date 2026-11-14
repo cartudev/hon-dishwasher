@@ -22,7 +22,8 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     let window = col()
         .key("window")
         .w_full()
-        .h_full()
+        // fit_content_height exige que la raíz no tenga altura fija ni fill: la mide
+        // del contenido. El fondo cubre igual con fill().
         .fill(t.bg)
         .px(space::S6)
         .py(space::S3)
@@ -56,7 +57,6 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
             col()
                 .key("body")
                 .w_full()
-                .grow(1.0)
                 .scroll(ScrollSpec { stick_bottom: false })
                 .child(match s.screen {
                     Screen::Home => home(s, t, accent),
@@ -67,33 +67,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
                 }),
         )
         .child(status_line(s, t, accent));
-    fit_window(s, cx);
     window
-}
-
-/// La altura que pide niri se mide del contenido real (pantalla + header + estado más
-/// padding y separaciones), así que ninguna pantalla necesita una altura escrita a mano.
-fn fit_window(s: &State, cx: &mut Cx<State>) {
-    if s.headless {
-        return;
-    }
-    let screen_key = match s.screen {
-        Screen::Home => "home",
-        Screen::Profile => "profile",
-        Screen::Review => "review",
-        Screen::Config => "config",
-        Screen::Stop => "stop",
-    };
-    if let (Some([_, content]), Some([_, header]), Some([_, status])) =
-        (cx.layout_size(screen_key), cx.layout_size("header"), cx.layout_size("status"))
-    {
-        // py(S3) arriba y abajo + gap(S3) entre las tres filas.
-        let target = (content + header + status + space::S3 * 4.0).round();
-        if s.fitted.get() != Some(target) {
-            s.fitted.set(Some(target));
-            let _ = rune::task::spawn("hon-fit", move || state::niri_resize(target));
-        }
-    }
 }
 
 fn status_line(s: &State, t: Theme, accent: Color) -> El {

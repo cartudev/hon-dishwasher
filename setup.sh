@@ -10,6 +10,13 @@ if [ ! -d vendor/rune/.git ]; then
   echo "Rune clonado en vendor/rune"
 fi
 
+# Parche a nivel Wayland: request_inner_size no debe vetar el resize por el estado
+# tiled que niri manda por el decorado SSD (prefer-no-csd). Sin esto, el alto de la
+# ventana no sigue al contenido en ningún compositor con decorados del servidor.
+if ! grep -qi "part of the veto" vendor/rune/vendor/winit/src/platform_impl/linux/wayland/window/state.rs 2>/dev/null; then
+  git -C vendor/rune apply "$PWD/patches/winit-request-inner-size.patch" && echo "Parche de winit aplicado"
+fi
+
 if [ ! -x .venv/bin/python ]; then
   python3 -m venv .venv
   .venv/bin/pip install --quiet -r requirements.txt

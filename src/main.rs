@@ -351,9 +351,10 @@ fn main() {
     })
     // La ventana vive aparte del tray: cerrarla no apaga la app.
     .keep_running()
-    // Widget flotante: el gestor de ventanas (niri incluido) la hace flotar. El tamaño
-    // lo pide la app al cambiar de pantalla (`state::go`); el usuario puede redimensionar.
+    // Widget flotante: el gestor de ventanas (niri incluido) la hace flotar y el alto
+    // sigue al contenido de cada pantalla (el ajuste del framework, vía winit).
     .float_on_open()
+    .fit_content_height()
     .window_options(rune::WindowOptions {
         min_size: Some((380.0, 0.0)),
         max_size: Some((560.0, 760.0)),
