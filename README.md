@@ -39,13 +39,24 @@ update. Requirements: `python3` + `python3-venv`, a tray host (waybar, KDE,
 `libsecret` package names: Arch `libsecret`, Debian/Ubuntu
 `libsecret-1-0 libsecret-tools`, Fedora `libsecret`.
 
-### Windows (x86_64)
+### Windows (x86_64), one line
+
+```powershell
+irm https://raw.githubusercontent.com/cartudev/hon-dishwasher/main/packaging/bootstrap.ps1 | iex
+```
+
+(Run it in PowerShell.) It downloads the latest release to
+`%LOCALAPPDATA%\hon-dishwasher`, creates the Python environment (pyhOn) and
+adds a launcher to the Startup folder (autostart on logon). Requires Python:
+`winget install Python.Python.3.12` if missing. Re-run it to update.
+
+### Windows (manual)
 
 Download
 [`hon-dishwasher-windows-x86_64.zip`](https://github.com/cartudev/hon-dishwasher/releases/latest/download/hon-dishwasher-windows-x86_64.zip)
 from the latest release, unpack it, create the venv
 (`python -m venv .venv && .venv\Scripts\pip install -r requirements.txt`) and
-run `run.bat`. Autostart: put a shortcut to `run.bat` in `shell:startup`.
+run `start-widget.bat`.
 
 ### Manual (any Linux)
 

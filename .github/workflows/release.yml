@@ -82,7 +82,7 @@ jobs:
           mkdir -p "dist/${dir}"
           cp target/release/hon-dishwasher.exe "dist/${dir}/"
           cp -r src config "dist/${dir}/"
-          cp requirements.txt run.bat "dist/${dir}/"
+          cp requirements.txt run.bat packaging/start-widget.bat "dist/${dir}/"
           cp README.md LICENSE "dist/${dir}/"
           cd dist && 7z a "hon-dishwasher-windows-x86_64.zip" "${dir}" && cd ..
           echo "file=dist/hon-dishwasher-windows-x86_64.zip" >> "$GITHUB_ENV"
