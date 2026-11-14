@@ -1,0 +1,92 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Clone Rune at the pinned dev rev
+        run: |
+          mkdir -p vendor
+          git clone --depth 1 https://github.com/anomalyco/rune.git vendor/rune
+          git -C vendor/rune fetch --depth 1 origin $(cat packaging/RUNE_REV)
+          git -C vendor/rune checkout $(cat packaging/RUNE_REV)
+
+      - name: Apply the Wayland patches
+        run: git -C vendor/rune apply "$GITHUB_WORKSPACE/patches/winit-request-inner-size.patch"
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Package
+        run: |
+          version="${GITHUB_REF#refs/tags/}"
+          dir="hon-dishwasher-${version}"
+          mkdir -p "dist/${dir}"
+          cp target/release/hon-dishwasher "dist/${dir}/"
+          cp -r src config "dist/${dir}/"
+          cp requirements.txt packaging/install.sh "dist/${dir}/"
+          cp README.md LICENSE "dist/${dir}/"
+          tar -C dist -czf "dist/${dir}.tar.gz" "${dir}"
+          echo "file=dist/${dir}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF#refs/tags/}"
+          gh release create "$version" "$file" \
+            --title "hon-dishwasher $version" \
+            --notes "Linux x86_64 build (glibc of ubuntu 24.04). Unpack, run
+            \`./install.sh\` (Python environment + autostart service), then fill in
+            your hOn credentials from the tray icon's Settings. The first query
+            takes ~30 s; after that the widget lists from its cache instantly." \
+            --verify-tag
+
+  windows:
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Clone Rune at the pinned dev rev
+        shell: bash
+        run: |
+          mkdir -p vendor
+          git clone --depth 1 https://github.com/anomalyco/rune.git vendor/rune
+          git -C vendor/rune fetch --depth 1 origin $(cat packaging/RUNE_REV)
+          git -C vendor/rune checkout $(cat packaging/RUNE_REV)
+
+      - name: Build (release, tray-only backend packaging)
+        run: cargo build --release
+
+      - name: Package
+        shell: bash
+        run: |
+          version="${GITHUB_REF#refs/tags/}"
+          dir="hon-dishwasher-${version}-windows"
+          mkdir -p "dist/${dir}"
+          cp target/release/hon-dishwasher.exe "dist/${dir}/"
+          cp -r src config "dist/${dir}/"
+          cp requirements.txt run.bat "dist/${dir}/"
+          cp README.md LICENSE "dist/${dir}/"
+          cd dist && 7z a "${dir}.zip" "${dir}" && cd ..
+          echo "file=dist/${dir}.zip" >> "$GITHUB_ENV"
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$version" "$file" --clobber
+        shell: bash

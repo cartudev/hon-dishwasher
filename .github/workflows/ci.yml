@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: pip install pyhOn==0.17.5 keyring
+
+      - name: Run backend tests
+        run: python -m unittest discover -s tests -v
+
+  rust-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Clone Rune at the pinned dev rev
+        run: |
+          mkdir -p vendor
+          git clone --depth 1 https://github.com/anomalyco/rune.git vendor/rune
+          git -C vendor/rune fetch --depth 1 origin $(cat packaging/RUNE_REV)
+          git -C vendor/rune checkout $(cat packaging/RUNE_REV)
+
+      - name: Apply the Wayland patches
+        run: git -C vendor/rune apply "$GITHUB_WORKSPACE/patches/winit-request-inner-size.patch"
+
+      - name: Check
+        run: cargo check
+
+      - name: Python backend tests (with venv)
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -q -r requirements.txt
+          .venv/bin/python -m unittest discover -s tests -v
