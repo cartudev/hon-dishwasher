@@ -3,6 +3,16 @@
 Widget de bandeja (Rune, ventana GPU nativa) para controlar un lavavajillas
 **Candy CF 6C4F1PS-12** vía la API de hOn, con el backend Python [pyhOn](https://github.com/home-assistant-libs/pyhOn).
 
+## Capturas
+
+| Inicio · ciclo en curso | Programa y opciones recordadas |
+|---|---|
+| ![Inicio con ciclo en curso](docs/screenshots/inicio-ciclo.png) | ![Programa](docs/screenshots/programa.png) |
+
+| Revisión (requiere `INICIAR`) | Configuración | Detener (requiere `DETENER`) |
+|---|---|---|
+| ![Revisión](docs/screenshots/revision.png) | ![Configuración](docs/screenshots/configuracion.png) | ![Detener](docs/screenshots/detener.png) |
+
 - Vive en la **bandeja del sistema**: icono con menú (Abrir, Actualizar, Configuración, Salir).
 - Ventana flotante **tipo widget**: altura por pantalla (se arrastra por los tres puntos ⋮).
 - **Autoinicio** con la sesión gráfica (systemd --user); cerrar la ventana no apaga la app.

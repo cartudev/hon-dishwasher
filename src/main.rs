@@ -306,7 +306,7 @@ fn main() {
                 s.screen = Screen::Config;
                 s.busy = false;
                 s.status = "Cuenta hOn".to_string();
-                s.email = TextEdit::new("cartu@ejemplo.com");
+                s.email = TextEdit::new("tu@correo.com");
                 s.password = TextEdit::new("secreta123");
             }),
             ("profile", |s| {
