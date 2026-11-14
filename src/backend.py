@@ -1,0 +1,576 @@
+from __future__ import annotations
+
+import asyncio
+import getpass
+import json
+import os
+import re
+import subprocess
+import sys
+import unicodedata
+from pathlib import Path
+from typing import Any
+
+SERVICE = "hon-dishwasher"
+CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+CONFIG_DIR = CONFIG_HOME / SERVICE
+CONFIG_FILE = CONFIG_DIR / "config.json"
+PROGRAMS_FILE = CONFIG_DIR / "programs.json"
+DEFAULT_PROGRAMS_FILE = Path(__file__).resolve().parent.parent / "config" / "programs.json"
+ACTIVE_MACHINE_MODES = {"2", "3", "4", "5"}
+
+
+class AppError(Exception):
+    def __init__(self, message: str, code: str = "app_error") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def emit(payload: dict[str, Any]) -> None:
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+
+def normalize(value: Any) -> str:
+    text = unicodedata.normalize("NFKD", str(value)).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+# --- Configuración de programas (la base extensible) -------------------------
+
+
+def validate_settings(data: Any, source: Path) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise AppError(f"{source}: el programs.json no es un objeto.", "programs_invalid")
+    target = data.get("target")
+    if not isinstance(target, dict) or not target.get("applianceType") or not target.get("model"):
+        raise AppError(f"{source}: falta target con applianceType y model.", "programs_invalid")
+    raw_programs = data.get("programs")
+    if not isinstance(raw_programs, list) or not raw_programs:
+        raise AppError(f"{source}: 'programs' debe ser una lista con al menos un programa.", "programs_invalid")
+    programs: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    seen_aliases: set[str] = set()
+    for raw in raw_programs:
+        if not isinstance(raw, dict):
+            raise AppError(f"{source}: cada programa debe ser un objeto.", "programs_invalid")
+        program_id = str(raw.get("id", "")).strip()
+        label = str(raw.get("label", "")).strip()
+        aliases = raw.get("aliases")
+        required = raw.get("required", [])
+        if not program_id or not re.fullmatch(r"[a-z0-9_-]+", program_id):
+            raise AppError(f"{source}: id inválido para un programa ({program_id!r}).", "programs_invalid")
+        if program_id in programs:
+            raise AppError(f"{source}: id de programa repetido ({program_id}).", "programs_invalid")
+        if not label or not isinstance(aliases, list) or not aliases:
+            raise AppError(f"{source}: {program_id} necesita label y aliases.", "programs_invalid")
+        normalized = {normalize(alias) for alias in aliases}
+        normalized.discard("")
+        if not normalized or (collides := normalized & seen_aliases):
+            raise AppError(f"{source}: alias repetido {sorted(collides)[0]!r} en {program_id}.", "programs_invalid")
+        seen_aliases |= normalized
+        if not isinstance(required, list):
+            raise AppError(f"{source}: required de {program_id} debe ser una lista.", "programs_invalid")
+        parsed_required = []
+        for option in required:
+            if not isinstance(option, dict) or not option.get("key") or not option.get("label"):
+                raise AppError(f"{source}: opciones de {program_id} necesitan key y label.", "programs_invalid")
+            parsed_required.append({"key": str(option["key"]), "label": str(option["label"])})
+        programs[program_id] = {
+            "id": program_id,
+            "label": label,
+            "aliases": normalized,
+            "required": parsed_required,
+            "basket": bool(raw.get("basket", False)),
+        }
+        order.append(program_id)
+    return {
+        "target": {"type": str(target["applianceType"]), "model": str(target["model"])},
+        "programs": programs,
+        "order": order,
+    }
+
+
+def load_settings() -> dict[str, Any]:
+    # El override del usuario manda si existe; si está roto, se informa y no se adivina.
+    source = PROGRAMS_FILE if PROGRAMS_FILE.is_file() else DEFAULT_PROGRAMS_FILE
+    try:
+        data = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise AppError(f"No se pudo leer {source}: {error}", "programs_unreadable")
+    return validate_settings(data, source)
+
+
+SETTINGS = load_settings()
+
+
+def reload_settings() -> None:
+    global SETTINGS
+    SETTINGS = load_settings()
+
+
+# --- Credenciales ------------------------------------------------------------
+
+
+def read_config() -> dict[str, Any]:
+    try:
+        data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise AppError("Faltan las credenciales. Abrí Configuración.", "config_missing")
+    except (OSError, json.JSONDecodeError):
+        raise AppError("No se pudo leer la configuración local.", "config_invalid")
+    email = data.get("email") if isinstance(data, dict) else None
+    if not isinstance(email, str) or not email.strip():
+        raise AppError("La configuración no contiene una cuenta hOn válida.", "config_invalid")
+    return {"email": email.strip()}
+
+
+def secret_tool(*args: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+    if not shutil_which("secret-tool"):
+        raise AppError("No está instalado secret-tool/libsecret.", "keyring_missing")
+    try:
+        return subprocess.run(
+            ["secret-tool", *args],
+            input=input_text,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        raise AppError("No se pudo acceder al keyring del sistema.", "keyring_unavailable")
+
+
+def shutil_which(name: str) -> str | None:
+    # Keep the backend dependency-free beyond pyhOn.
+    from shutil import which
+
+    return which(name)
+
+
+def get_secret(email: str) -> str:
+    result = secret_tool("lookup", "service", SERVICE, "account", email)
+    if result.returncode != 0 or not result.stdout:
+        raise AppError("No encuentro la contraseña en el keyring. Abrí Configuración.", "secret_missing")
+    return result.stdout.rstrip("\n")
+
+
+def save_config(email: str) -> None:
+    CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        os.chmod(CONFIG_DIR, 0o700)
+        temporary = CONFIG_FILE.with_suffix(".json.tmp")
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as config:
+            json.dump({"email": email, "version": 1}, config)
+            config.write("\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, CONFIG_FILE)
+        os.chmod(CONFIG_FILE, 0o600)
+    except OSError:
+        raise AppError("No se pudo guardar la configuración local.", "config_write_failed")
+
+
+def store_into_keyring(email: str, password: str) -> None:
+    result = secret_tool(
+        "store",
+        "--label=Contraseña de hOn (Candy dishwasher)",
+        "service",
+        SERVICE,
+        "account",
+        email,
+        input_text=f"{password}\n",
+    )
+    password = ""
+    if result.returncode != 0:
+        raise AppError("El keyring rechazó el guardado; no se guardó la cuenta.", "keyring_write_failed")
+
+
+def store_credentials() -> dict[str, Any]:
+    # La contraseña llega por stdin (JSON) desde la app Rune, nunca por argv ni por disco.
+    try:
+        payload = json.loads(sys.stdin.read())
+    except json.JSONDecodeError:
+        raise AppError("La entrada para guardar credenciales no es válida.", "store_input_invalid")
+    email = payload.get("email") if isinstance(payload, dict) else None
+    password = payload.get("password") if isinstance(payload, dict) else None
+    if not isinstance(email, str) or not email.strip() or "@" not in email:
+        raise AppError("El correo no parece válido; no guardé nada.", "invalid_email")
+    if not isinstance(password, str) or not password:
+        raise AppError("La contraseña está vacía; no guardé nada.", "empty_password")
+    email = email.strip()
+    store_into_keyring(email, password)
+    save_config(email)
+    return {"ok": True, "saved": True}
+
+
+def configure() -> None:
+    print("Configuración de la cuenta hOn (se guarda solo en este equipo).")
+    email = input("Correo de hOn: ").strip()
+    if not email or "@" not in email:
+        raise AppError("El correo no parece válido.", "invalid_email")
+    password = getpass.getpass("Contraseña de hOn (oculta): ")
+    if not password:
+        raise AppError("La contraseña está vacía; no guardé nada.", "empty_password")
+    store_into_keyring(email, password)
+    save_config(email)
+    print("Credenciales guardadas en el keyring del sistema.")
+
+
+def config_status() -> dict[str, Any]:
+    try:
+        config = read_config()
+    except AppError:
+        return {"configured": False}
+    result = secret_tool("lookup", "service", SERVICE, "account", config["email"])
+    return {"configured": result.returncode == 0 and bool(result.stdout)}
+
+
+# --- Motor genérico de esquema -----------------------------------------------
+
+
+def bool_on(value: Any) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def parameter_values(parameter: Any) -> set[str]:
+    typology = str(getattr(parameter, "typology", ""))
+    if typology == "range":
+        return set()
+    try:
+        return {str(value).strip().lower() for value in parameter.values}
+    except (AttributeError, TypeError, ValueError):
+        return set()
+
+
+def allows(parameter: Any, value: str) -> bool:
+    if parameter is None:
+        return False
+    wanted = str(value).strip().lower()
+    typology = str(getattr(parameter, "typology", ""))
+    if typology == "fixed":
+        return str(getattr(parameter, "value", "")).strip().lower() == wanted
+    if typology == "range":
+        try:
+            number = float(wanted)
+            low = float(parameter.min)
+            high = float(parameter.max)
+            step = float(parameter.step)
+            if step <= 0 or number < low - 1e-9 or number > high + 1e-9:
+                return False
+            index = (number - low) / step
+            return abs(index - round(index)) < 1e-8
+        except (AttributeError, TypeError, ValueError):
+            return False
+    return wanted in parameter_values(parameter)
+
+
+def settable(parameter: Any, value: str) -> bool:
+    return parameter is not None and str(getattr(parameter, "typology", "")) != "fixed" and allows(parameter, value)
+
+
+def parameter_state(parameter: Any, value: str = "1") -> dict[str, Any]:
+    if parameter is None:
+        return {"supported": False, "reason": "no_expuesto"}
+    pinned = str(getattr(parameter, "typology", "")) == "fixed"
+    accepted = allows(parameter, value)
+    return {
+        "supported": accepted,
+        "pinned": pinned,
+        "reason": "fijo_en_1" if accepted and pinned else ("no_acepta_1" if not accepted else ""),
+    }
+
+
+def program_def(program_id: str) -> dict[str, Any]:
+    if program_id not in SETTINGS["programs"]:
+        raise AppError("Programa no admitido por esta app.", "profile_invalid")
+    return SETTINGS["programs"][program_id]
+
+
+def get_profile_category(start_command: Any, program: dict[str, Any]) -> tuple[str | None, Any | None]:
+    categories = getattr(start_command, "categories", {}) or {}
+    matches = [
+        (str(code), category)
+        for code, category in categories.items()
+        if normalize(code) in program["aliases"]
+    ]
+    if len(matches) != 1:
+        return None, None
+    return matches[0]
+
+
+def inspect_profile(start_command: Any, program: dict[str, Any]) -> dict[str, Any]:
+    code, category = get_profile_category(start_command, program)
+    if category is None:
+        return {
+            "id": program["id"],
+            "label": program["label"],
+            "available": False,
+            "code": None,
+            "reason": "El API no expone una categoría inequívoca para este programa.",
+            "required": [
+                {"key": option["key"], "label": option["label"], "supported": False, "pinned": False, "reason": "no_expuesto"}
+                for option in program["required"]
+            ],
+            "basket": {"available": False, "choices": []},
+        }
+
+    params = getattr(category, "parameters", {}) or {}
+    required = []
+    for option in program["required"]:
+        state = parameter_state(params.get(option["key"]), "1")
+        required.append({"key": option["key"], "label": option["label"], **state})
+    missing = [option["label"] for option in required if not option["supported"]]
+
+    diverter = params.get("diverterLevel")
+    half_load = params.get("halfLoad")
+    basket_choices = []
+    if program["basket"] and all(settable(diverter, value) for value in ("0", "1", "2")) and all(
+        settable(half_load, value) for value in ("0", "1")
+    ):
+        basket_choices = ["off", "upper", "lower"]
+
+    return {
+        "id": program["id"],
+        "label": program["label"],
+        "available": not missing,
+        "code": code,
+        "reason": "" if not missing else "No disponibles: " + ", ".join(missing) + ".",
+        "required": required,
+        "basket": {
+            "available": bool(basket_choices),
+            "choices": basket_choices,
+            "reason": "" if basket_choices else "Canasta superior/inferior no confirmada para este programa.",
+        },
+    }
+
+
+async def connect_device() -> tuple[Any, Any]:
+    try:
+        from pyhon import Hon
+    except ImportError:
+        raise AppError("No está instalado pyhOn. Ejecutá ./setup.sh.", "pyhon_missing")
+
+    config = read_config()
+    password = get_secret(config["email"])
+    try:
+        hon = await Hon(config["email"], password).__aenter__()
+    except Exception:
+        password = ""
+        raise AppError("hOn no permitió iniciar sesión o consultar el aparato.", "hon_connection_failed")
+    password = ""
+    target = SETTINGS["target"]
+    matches = [
+        appliance
+        for appliance in hon.appliances
+        if appliance.appliance_type == target["type"] and target["model"] in appliance.model_name
+    ]
+    if len(matches) != 1:
+        await hon.__aexit__(None, None, None)
+        raise AppError(
+            f"Se esperaba exactamente un aparato {target['model']}; se encontraron {len(matches)}.",
+            "device_not_unique",
+        )
+    return hon, matches[0]
+
+
+def live_state(appliance: Any) -> dict[str, Any]:
+    start = appliance.commands.get("startProgram")
+    remote = {
+        key: bool_on(appliance.get(key, None))
+        for key in ("remoteCtrValid", "remoteActionable", "remoteVisible")
+    }
+    door = appliance.get("doorStatus", None)
+    mode = appliance.get("machMode", None)
+    profiles = {}
+    for program_id in SETTINGS["order"]:
+        program = SETTINGS["programs"][program_id]
+        if start:
+            profiles[program_id] = inspect_profile(start, program)
+        else:
+            profiles[program_id] = {
+                "id": program_id,
+                "label": program["label"],
+                "available": False,
+                "code": None,
+                "reason": "El dispositivo no expone startProgram.",
+                "required": [
+                    {"key": option["key"], "label": option["label"], "supported": False, "pinned": False, "reason": "no_expuesto"}
+                    for option in program["required"]
+                ],
+                "basket": {"available": False, "choices": []},
+            }
+    return {
+        "ok": True,
+        "model": appliance.model_name,
+        "remote": remote,
+        "remote_ready": all(remote.values()),
+        "door_status": None if door is None else str(door),
+        "machine_mode": None if mode is None else str(mode),
+        "profileOrder": list(SETTINGS["order"]),
+        "profiles": profiles,
+    }
+
+
+def check_start_preconditions(appliance: Any, program_id: str, basket: str) -> tuple[Any, Any]:
+    if basket not in {"off", "upper", "lower"}:
+        raise AppError("Opción de media carga no válida.", "basket_invalid")
+    program = program_def(program_id)
+
+    remote = {key: appliance.get(key, None) for key in ("remoteCtrValid", "remoteActionable", "remoteVisible")}
+    if not all(bool_on(value) for value in remote.values()):
+        raise AppError("El control remoto no está habilitado/listo en el aparato.", "remote_not_ready")
+
+    door = appliance.get("doorStatus", None)
+    if door is not None and str(door).strip().lower() in {"1", "true", "open"}:
+        raise AppError("hOn reporta la puerta física abierta. Cerrala y volvé a actualizar.", "door_open")
+
+    mode = appliance.get("machMode", None)
+    if mode is not None and str(mode) in ACTIVE_MACHINE_MODES:
+        raise AppError("El aparato ya está en un ciclo o inicio diferido; no envié otro.", "cycle_active")
+
+    start = appliance.commands.get("startProgram")
+    if start is None:
+        raise AppError("El aparato no expone startProgram.", "program_command_missing")
+    code, category = get_profile_category(start, program)
+    if code is None or category is None:
+        raise AppError("El programa elegido no aparece inequívocamente en el esquema actual.", "program_missing")
+
+    params = getattr(category, "parameters", {}) or {}
+    for option in program["required"]:
+        parameter = params.get(option["key"])
+        if not allows(parameter, "1"):
+            raise AppError(f"El programa elegido no admite {option['label']}=1.", "required_option_unavailable")
+
+    diverter = params.get("diverterLevel")
+    half_load = params.get("halfLoad")
+    if basket != "off":
+        requested_level = "1" if basket == "upper" else "2"
+        if not program["basket"] or not settable(diverter, requested_level) or not settable(half_load, "1"):
+            raise AppError("El programa no admite esa media carga según su esquema actual.", "basket_unavailable")
+    else:
+        for parameter in (diverter, half_load):
+            if parameter is not None and str(getattr(parameter, "typology", "")) == "fixed":
+                if not allows(parameter, "0"):
+                    raise AppError("El programa fija una media carga y no permite desactivarla.", "basket_fixed_on")
+            elif parameter is not None and not allows(parameter, "0"):
+                raise AppError("El programa no permite garantizar la opción sin media carga.", "basket_off_unavailable")
+
+    return start, category
+
+
+async def inspect() -> dict[str, Any]:
+    hon, appliance = await connect_device()
+    try:
+        return live_state(appliance)
+    finally:
+        await hon.__aexit__(None, None, None)
+
+
+async def start_program(program_id: str, basket: str) -> dict[str, Any]:
+    program = program_def(program_id)
+    hon, appliance = await connect_device()
+    try:
+        base_command, _ = check_start_preconditions(appliance, program_id, basket)
+        available = base_command.available_settings
+        program_param = next(
+            (available.get(name) for name in ("program", "prCode") if available.get(name)),
+            None,
+        )
+        if program_param is None:
+            raise AppError("El esquema no expone el selector de programa esperado.", "program_selector_missing")
+        program_code, _ = get_profile_category(base_command, program)
+        if program_code is None:
+            raise AppError("El programa dejó de estar disponible durante la preparación.", "program_missing")
+        program_param.value = program_code
+
+        command = appliance.commands.get("startProgram")
+        if command is None:
+            raise AppError("No se pudo seleccionar el comando startProgram.", "program_command_missing")
+        params = command.parameters
+
+        for option in program["required"]:
+            parameter = params.get(option["key"])
+            if parameter is None:
+                raise AppError(f"El comando activo perdió la opción {option['key']}; no envié nada.", "schema_changed")
+            if str(getattr(parameter, "typology", "")) != "fixed":
+                parameter.value = "1"
+
+        diverter = params.get("diverterLevel")
+        half_load = params.get("halfLoad")
+        level = {"off": "0", "upper": "1", "lower": "2"}[basket]
+        if basket != "off":
+            if diverter is None or half_load is None:
+                raise AppError("Faltan parámetros de media carga en el comando activo.", "schema_changed")
+            diverter.value = level
+            half_load.value = "1"
+        else:
+            if diverter is not None and str(getattr(diverter, "typology", "")) != "fixed":
+                if allows(diverter, "0"):
+                    diverter.value = "0"
+            if half_load is not None and str(getattr(half_load, "typology", "")) != "fixed":
+                if allows(half_load, "0"):
+                    half_load.value = "0"
+
+        # Guard against the category changing under us: serialize the selected profile's
+        # command object, not the command reference obtained before pyhOn's category swap.
+        selected = appliance.commands.get("startProgram")
+        if selected is None or selected.category != command.category:
+            raise AppError("El comando cambió mientras se preparaba; no envié nada.", "command_changed")
+        accepted = await selected.send()
+        if not accepted:
+            raise AppError("hOn no aceptó el comando de inicio.", "command_rejected")
+        return {"ok": True, "sent": True, "program": program["label"], "basket": basket}
+    finally:
+        await hon.__aexit__(None, None, None)
+
+
+async def dispatch(args: list[str]) -> None:
+    reload_settings()
+    if not args:
+        raise AppError("Falta una operación.", "usage")
+    operation = args[0]
+    if operation == "status":
+        emit({"ok": True, **config_status()})
+        return
+    if operation == "store":
+        emit(store_credentials())
+        return
+    if operation == "inspect":
+        emit(await inspect())
+        return
+    if operation == "start":
+        if len(args) != 4 or args[3] != "INICIAR":
+            raise AppError("Falta confirmación explícita; no envié ningún comando.", "confirmation_required")
+        emit(await start_program(args[1], args[2]))
+        return
+    raise AppError("Operación desconocida.", "usage")
+
+
+def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "configure":
+        try:
+            configure()
+            return 0
+        except AppError as error:
+            print(str(error), file=sys.stderr)
+            return 1
+        except (EOFError, KeyboardInterrupt):
+            print("\nConfiguración cancelada; no se envió nada.", file=sys.stderr)
+            return 1
+
+    try:
+        asyncio.run(dispatch(sys.argv[1:]))
+        return 0
+    except AppError as error:
+        emit({"ok": False, "code": error.code, "error": str(error)})
+        return 1
+    except KeyboardInterrupt:
+        emit({"ok": False, "code": "cancelled", "error": "Operación cancelada."})
+        return 1
+    except Exception:
+        # Avoid emitting exception details: library errors may contain user or device data.
+        emit({"ok": False, "code": "unexpected", "error": "Falló la operación con hOn; no se mostrarán datos sensibles."})
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

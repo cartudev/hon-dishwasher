@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Frente de lavavajillas: panel superior, dos platos -->
+  <rect x="5" y="3" width="22" height="26" rx="4" fill="none" stroke="#ffb35c" stroke-width="2.5"/>
+  <line x1="5.5" y1="9.5" x2="26.5" y2="9.5" stroke="#ffb35c" stroke-width="2"/>
+  <circle cx="9.5" cy="6.2" r="1.2" fill="#ffb35c"/>
+  <circle cx="13.5" cy="6.2" r="1.2" fill="#ffb35c"/>
+  <ellipse cx="16" cy="15.5" rx="6.5" ry="2.3" fill="none" stroke="#ffb35c" stroke-width="2"/>
+  <ellipse cx="16" cy="21.5" rx="6.5" ry="2.3" fill="none" stroke="#ffb35c" stroke-width="2"/>
+</svg>
