@@ -171,11 +171,15 @@ pub fn screen_size(screen: Screen) -> (f32, f32) {
 }
 
 /// Cambia de pantalla; el alto lo sigue `fit_content_height` del framework.
-pub fn go(s: &mut State, screen: Screen, _tx: &mut Tx) {
+/// `instant` aterriza el cambio y su ajuste de alto sin resorte: durante la
+/// transición el dibujado y el hit-test se desfasaban un frame y los clicks
+/// caían desplazados ("más arriba") justo al entrar a programa/configuración.
+pub fn go(s: &mut State, screen: Screen, tx: &mut Tx) {
     s.screen = screen;
     if screen == Screen::Review {
         s.confirmation.clear();
     }
+    tx.instant();
 }
 
 /// Fija la altura de nuestra ventana en niri (busca el id por PID; reintenta porque
