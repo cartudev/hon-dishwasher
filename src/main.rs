@@ -60,13 +60,13 @@ fn start_cycle(s: &mut State) {
     let _ = rune::task::spawn("hon-start", move || {
         let result = backend::call(&["start", &program, basket.as_str(), "INICIAR"], None);
         let refresh = me.clone();
-        me.update(move |s, _| {
+        me.update(move |s, tx| {
             s.busy = false;
             s.confirmation.clear();
             match result {
                 Ok(_) => {
                     s.status = format!("hOn aceptó el inicio de {label}.");
-                    s.screen = Screen::Home;
+                    state::go(s, Screen::Home, tx);
                     s.basket = Basket::Off;
                     inspect(refresh);
                 }
@@ -91,13 +91,13 @@ fn save_credentials(s: &mut State) {
         let payload = serde_json::json!({ "email": email, "password": password });
         let result = backend::call(&["store"], Some(payload.to_string()));
         let refresh = me.clone();
-        me.update(move |s, _| {
+        me.update(move |s, tx| {
             s.busy = false;
             s.password = TextEdit::new("");
             match result {
                 Ok(_) => {
                     s.status = "Credenciales guardadas en el keyring del sistema.".to_string();
-                    s.screen = Screen::Home;
+                    state::go(s, Screen::Home, tx);
                     inspect(refresh);
                 }
                 Err(error) => s.status = error,
@@ -108,21 +108,25 @@ fn save_credentials(s: &mut State) {
 }
 
 /// Escape vuelve atrás; la revisión descarta lo escrito para no dejar un INICIAR listo.
-fn on_key(s: &mut State, event: &KeyEvent, _: &mut Tx) -> bool {
+fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     if event.key != Key::Escape {
         return false;
     }
+    // Escape vuelve atrás; desde el inicio, esconde la ventana al tray (la app sigue viva).
     match s.screen {
         Screen::Review => {
-            s.screen = Screen::Profile;
+            state::go(s, Screen::Profile, tx);
             s.confirmation.clear();
             true
         }
         Screen::Profile | Screen::Config => {
-            s.screen = Screen::Home;
+            state::go(s, Screen::Home, tx);
             true
         }
-        Screen::Home => false,
+        Screen::Home => {
+            s.me.hide();
+            true
+        }
     }
 }
 
@@ -145,19 +149,26 @@ fn build_tray(handle: rune::AppHandle<State>) -> rune::Tray {
     let click = handle.clone();
     let menu = handle.clone();
     rune::Tray::new(spec, move |event| match event {
-        TrayEvent::Activate { token } => match token {
-            Some(token) if !token.is_empty() => click.activate(token),
-            _ => click.open(),
-        },
+        TrayEvent::Activate { token } => {
+            match token {
+                Some(token) if !token.is_empty() => click.activate(token),
+                _ => click.open(),
+            }
+            // Tras reabrir (o enfocar), la altura vuelve a la de la pantalla activa.
+            click.update(|s, _| state::reapply_size(s));
+        }
         TrayEvent::Menu(id) => match id.as_str() {
-            "open" => menu.open(),
+            "open" => {
+                menu.open();
+                menu.update(|s, _| state::reapply_size(s));
+            }
             "refresh" => {
                 menu.open();
                 menu.update(|s, _| crate::refresh(s));
             }
             "config" => {
                 menu.open();
-                menu.update(|s, _| s.screen = Screen::Config);
+                menu.update(|s, tx| state::go(s, Screen::Config, tx));
             }
             "quit" => menu.quit(),
             _ => {}
@@ -169,6 +180,9 @@ fn build_tray(handle: rune::AppHandle<State>) -> rune::Tray {
 }
 
 fn main() {
+    // El app_id deja que el gestor de ventanas (niri) le aplique reglas: flotar y
+    // abrir cerca de la bandeja (`default-floating-position` en el config.kdl).
+    rune::set_app_id("hon-dishwasher");
     let app = App::new(AppSpec::<State> {
         scenes: &[
             ("config", |s| {
@@ -205,17 +219,16 @@ fn main() {
             }),
         ],
         on_key: Some(on_key),
-        ..AppSpec::new("Candy — Lavavajillas", (400.0, 160.0), || unreachable!(), view)
+        ..AppSpec::new("Candy — Lavavajillas", state::screen_size(Screen::Home), || unreachable!(), view)
     })
     // La ventana vive aparte del tray: cerrarla no apaga la app.
     .keep_running()
-    // Widget flotante: el gestor de ventanas (niri incluido) la hace flotar, la altura
-    // sigue al contenido y el tamaño queda acotado.
+    // Widget flotante: el gestor de ventanas (niri incluido) la hace flotar. El tamaño
+    // lo pide la app al cambiar de pantalla (`state::go`); el usuario puede redimensionar.
     .float_on_open()
-    .fit_content_height()
     .window_options(rune::WindowOptions {
-        min_size: Some((320.0, 0.0)),
-        max_size: Some((460.0, 720.0)),
+        min_size: Some((380.0, 0.0)),
+        max_size: Some((560.0, 760.0)),
         ..Default::default()
     });
     let handle = app.handle();

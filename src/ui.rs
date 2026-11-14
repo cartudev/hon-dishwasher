@@ -3,7 +3,7 @@
 use rune::tok::{self, Theme, motion, radius, space, type_};
 use rune::{Color, Cx, El, ScrollSpec, Tx, col, el, row, text, text_input};
 
-use crate::state::{Basket, Screen, State};
+use crate::state::{self, Basket, Screen, State};
 
 pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     let dark = cx.system_dark();
@@ -18,23 +18,41 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     col()
         .key("window")
         .w_full()
+        .h_full()
         .fill(t.bg)
         .px(space::S6)
         .py(space::S3)
         .gap(space::S3)
         .child(
-            col()
+            row()
                 .key("header")
-                .gap(2.0)
-                .child(text("Candy · hOn").key("title").font(type_::TITLE).color(t.text))
-                .child(text(model).key("model").font(type_::LABEL).color(t.text_secondary)),
+                .gap(8.0)
+                .window_drag()
+                .child(
+                    // Puntos dibujados (sin texto): un texto es hit target y conservaría
+                    // el press, así que el grip no arrastraría.
+                    col()
+                        .key("drag-grip")
+                        .gap(4.0)
+                        .center_y()
+                        .h(28.0)
+                        .child(el().key("dot1").size(4.0, 4.0).radius(2.0).fill(t.text_secondary))
+                        .child(el().key("dot2").size(4.0, 4.0).radius(2.0).fill(t.text_secondary))
+                        .child(el().key("dot3").size(4.0, 4.0).radius(2.0).fill(t.text_secondary)),
+                )
+                .child(
+                    col()
+                        .key("titles")
+                        .gap(2.0)
+                        .child(text("Candy · hOn").key("title").font(type_::TITLE).color(t.text))
+                        .child(text(model).key("model").font(type_::LABEL).color(t.text_secondary)),
+                ),
         )
         .child(
             col()
                 .key("body")
                 .w_full()
-                .shrink()
-                .max_h(520.0)
+                .grow(1.0)
                 .scroll(ScrollSpec { stick_bottom: false })
                 .child(match s.screen {
                     Screen::Home => home(s, t, accent),
@@ -131,9 +149,14 @@ fn home(s: &State, t: Theme, accent: Color) -> El {
         .child(text("Elegí un programa (no inicia nada)").key("hint").font(type_::SECTION).color(t.text_secondary))
         .child(if ready {
             programs
-        } else {
+        } else if s.busy {
             text("Consultando el aparato para listar los programas…")
                 .key("programs-loading")
+                .font(type_::BODY)
+                .color(t.text_secondary)
+        } else {
+            text("Sin datos del aparato; mirá el estado de abajo.")
+                .key("programs-none")
                 .font(type_::BODY)
                 .color(t.text_secondary)
         })
@@ -142,7 +165,7 @@ fn home(s: &State, t: Theme, accent: Color) -> El {
                 .key("home-actions")
                 .gap(space::S2)
                 .child(action("refresh", "Actualizar", t, true, false, accent, |s, _| crate::refresh(s)))
-                .child(action("config", "Configuración", t, true, false, accent, |s, _| s.screen = Screen::Config))
+                .child(action("config", "Configuración", t, true, false, accent, |s, tx| state::go(s, Screen::Config, tx)))
                 .child(action("quit", "Salir", t, true, false, accent, |_, tx| tx.quit())),
         )
 }
@@ -276,7 +299,7 @@ fn profile_screen(s: &State, t: Theme, accent: Color) -> El {
             row()
                 .key("profile-actions")
                 .gap(space::S2)
-                .child(action("back", "Volver", t, true, false, accent, |s, _| s.screen = Screen::Home))
+                .child(action("back", "Volver", t, true, false, accent, |s, tx| state::go(s, Screen::Home, tx)))
                 .child(action(
                     "review",
                     "Revisar…",
@@ -284,10 +307,7 @@ fn profile_screen(s: &State, t: Theme, accent: Color) -> El {
                     available,
                     true,
                     accent,
-                    |s, _| {
-                        s.screen = Screen::Review;
-                        s.confirmation.clear();
-                    },
+                    |s, tx| state::go(s, Screen::Review, tx),
                 )),
         )
 }
@@ -356,7 +376,9 @@ fn review(s: &State, t: Theme, accent: Color) -> El {
                         text_input(&s.confirmation, type_::BODY)
                             .key("confirmation")
                             .single_line()
+                            .w_full()
                             .color(t.text)
+                            .label("Confirmación INICIAR")
                             .on_edit(|s: &mut State| &mut s.confirmation),
                         t,
                     ),
@@ -373,8 +395,8 @@ fn review(s: &State, t: Theme, accent: Color) -> El {
                     true,
                     false,
                     accent,
-                    |s, _| {
-                        s.screen = Screen::Profile;
+                    |s, tx| {
+                        state::go(s, Screen::Profile, tx);
                         s.confirmation.clear();
                     },
                 ))
@@ -404,7 +426,9 @@ fn config(s: &State, t: Theme, accent: Color) -> El {
                         text_input(&s.email, type_::BODY)
                             .key("email")
                             .single_line()
+                            .w_full()
                             .color(t.text)
+                            .label("Correo de hOn")
                             .on_edit(|s: &mut State| &mut s.email),
                         t,
                     ),
@@ -422,7 +446,9 @@ fn config(s: &State, t: Theme, accent: Color) -> El {
                             .key("password")
                             .single_line()
                             .secure()
+                            .w_full()
                             .color(t.text)
+                            .label("Contraseña")
                             .on_edit(|s: &mut State| &mut s.password),
                         t,
                     ),
@@ -432,7 +458,7 @@ fn config(s: &State, t: Theme, accent: Color) -> El {
             row()
                 .key("config-actions")
                 .gap(space::S2)
-                .child(action("back", "Volver", t, true, false, accent, |s, _| s.screen = Screen::Home))
+                .child(action("back", "Volver", t, true, false, accent, |s, tx| state::go(s, Screen::Home, tx)))
                 .child(action("save", "Guardar credenciales", t, can_save, true, accent, |s, _| crate::save_credentials(s))),
         )
 }

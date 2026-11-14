@@ -1,6 +1,6 @@
 //! Estado de la app: pantalla activa, programa elegido, media carga y los campos de texto.
 
-use rune::{AppHandle, TextEdit};
+use rune::{AppHandle, TextEdit, Tx};
 
 use crate::model::{ProfileInfo, Snapshot};
 
@@ -115,4 +115,64 @@ impl State {
             _ => "hOn no publica la puerta; comprobá que esté cerrada",
         }
     }
+}
+
+/// Altura natural de cada pantalla (ancho 460): el resize del framework no aplica en
+/// Wayland (winit rechaza `request_inner_size` con los estados del compositor), así que
+/// el tamaño lo fija niri por IPC sobre nuestra ventana.
+pub fn screen_size(screen: Screen) -> (f32, f32) {
+    let height = match screen {
+        Screen::Home => 320.0,
+        Screen::Profile => 390.0,
+        Screen::Review => 430.0,
+        Screen::Config => 365.0,
+    };
+    (460.0, height)
+}
+
+/// Cambia de pantalla y ajusta la ventana a su tamaño en el mismo paso.
+pub fn go(s: &mut State, screen: Screen, tx: &mut Tx) {
+    s.screen = screen;
+    if screen == Screen::Review {
+        s.confirmation.clear();
+    }
+    let size = screen_size(screen);
+    tx.resize_window_instant(size);
+    let (_, height) = size;
+    let _ = rune::task::spawn("hon-resize", move || niri_resize(height));
+}
+
+/// Fija la altura de nuestra ventana en niri (busca el id por PID; reintenta porque
+/// la ventana puede estar mapeándose todavía). Sin niri, queda en silencio.
+pub fn niri_resize(height: f32) {
+    use std::process::{Command, Stdio};
+    let quiet = |command: &mut Command| {
+        let _ = command.stdout(Stdio::null()).stderr(Stdio::null()).status();
+    };
+    for _ in 0..6 {
+        let Some(list) = Command::new("niri").args(["msg", "--json", "windows"]).output().ok()
+            .and_then(|out| serde_json::from_slice::<serde_json::Value>(&out.stdout).ok())
+        else {
+            return;
+        };
+        let pid = std::process::id();
+        let Some(id) = list.as_array().and_then(|windows| {
+            windows
+                .iter()
+                .find(|w| w.get("pid").and_then(|p| p.as_u64()) == Some(pid as u64))
+                .and_then(|w| w.get("id").and_then(|i| i.as_u64()).map(|i| i.to_string()))
+        }) else {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            continue;
+        };
+        quiet(Command::new("niri").args(["msg", "action", "set-window-height", "--id", &id, &format!("{height}")]));
+        return;
+    }
+}
+
+/// Reaplica el tamaño de la pantalla activa (tras reabrir la ventana desde el tray,
+/// donde el cambio de pantalla no pasó por `go`).
+pub fn reapply_size(s: &State) {
+    let (_, height) = screen_size(s.screen);
+    let _ = rune::task::spawn("hon-resize-open", move || niri_resize(height));
 }

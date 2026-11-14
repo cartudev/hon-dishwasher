@@ -21,6 +21,28 @@ cd hon-dishwasher-tui
 
 El icono aparece donde haya **tray host**: waybar, KDE, la mayoría de las barras
 (GNOME necesita una extensión). Clic primario abre la ventana; secundario, el menú.
+**Escape** esconde la ventana de vuelta al tray (la app sigue viva en la bandeja).
+
+### Ventana flotante y tamaño
+
+La ventana se declara con `app_id "hon-dishwasher"`. En niri conviene una regla que la
+haga flotar y abrir cerca de la bandeja (con esta regla niri la abre arriba a la derecha;
+después recuerda la posición que le des arrastrándola):
+
+```kdl
+window-rule {
+    match app-id="^hon-dishwasher$"
+    open-floating true
+    default-floating-position x=16 y=16 relative-to="top-right"
+}
+```
+
+El tamaño se ajusta **por pantalla** (Inicio 320, programa 390, revisión 430,
+configuración 365 de alto): Wayland no deja a winit redimensionarse a sí mismo con los
+estados del compositor, así que la app pide el alto por IPC de niri
+(`niri msg action set-window-height --id …`). Sin niri, queda el tamaño fijo inicial.
+Para arrastrar la ventana, agarrala por los **tres puntos (⋮)** de la esquina superior
+izquierda, o usá el drag de niri (Mod + arrastrar).
 
 ## Programas y opciones: `config/programs.json`
 
