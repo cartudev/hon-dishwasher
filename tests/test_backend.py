@@ -296,6 +296,13 @@ class RemoteAndCategoryTests(unittest.TestCase):
         appliance.commands["startProgram"] = intensive
         selected = backend.select_start_category(appliance, start, "prewash")
         self.assertIs(selected, prewash)
+        # pyhOn keys the dict with the cleaned name and keeps the raw API name
+        # on the command. The string must not be required to match.
+        prewash.category = "PROGRAMS.PREWASH"
+        appliance.commands["startProgram"] = intensive
+        selected = backend.select_start_category(appliance, start, "prewash")
+        self.assertIs(selected, prewash)
+        self.assertEqual(selected.category, "PROGRAMS.PREWASH")
 
 
 class CacheTests(unittest.TestCase):
