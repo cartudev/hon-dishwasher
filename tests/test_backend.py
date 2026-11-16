@@ -304,6 +304,14 @@ class RemoteAndCategoryTests(unittest.TestCase):
         self.assertIs(selected, prewash)
         self.assertEqual(selected.category, "PROGRAMS.PREWASH")
 
+    def test_estimated_minutes_reads_the_program_card(self):
+        class Command:
+            parameters = {"remainingTime": Parameter(["146"], value="146", typology="fixed")}
+
+        self.assertEqual(backend.estimated_minutes(Command()), 146)
+        Command.parameters = {}
+        self.assertIsNone(backend.estimated_minutes(Command()))
+
 
 class CacheTests(unittest.TestCase):
     def setUp(self):

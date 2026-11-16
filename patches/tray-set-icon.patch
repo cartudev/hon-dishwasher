@@ -1,0 +1,86 @@
+diff --git a/crates/rune/src/tray.rs b/crates/rune/src/tray.rs
+index 60ccb02..bca863e 100644
+--- a/crates/rune/src/tray.rs
++++ b/crates/rune/src/tray.rs
+@@ -121,6 +121,13 @@ impl Tray {
+         #[cfg(not(any(all(target_os = "linux", feature = "dbus"), target_os = "windows")))]
+         let _ = tooltip;
+     }
++    /// Replaces the icon pixels and tells the host (`NewIcon` on Linux, `NIM_MODIFY` on Windows).
++    pub fn set_icon(&self, icon: TrayIcon) {
++        #[cfg(any(all(target_os = "linux", feature = "dbus"), target_os = "windows"))]
++        self.native.set_icon(icon);
++        #[cfg(not(any(all(target_os = "linux", feature = "dbus"), target_os = "windows")))]
++        let _ = icon;
++    }
+ }
+ 
+ #[cfg(test)]
+diff --git a/crates/rune/src/tray/sni.rs b/crates/rune/src/tray/sni.rs
+index 1919a9d..eba73f6 100644
+--- a/crates/rune/src/tray/sni.rs
++++ b/crates/rune/src/tray/sni.rs
+@@ -21,16 +21,17 @@ type Layout = (i32, HashMap<String, OwnedVariant>, Vec<OwnedVariant>);
+ struct Model { id: String, title: String, tooltip: String, icon_name: String, pixmaps: Pixmaps, menu: Vec<TrayItem>, revision: u32, token: Option<String> }
+ type Shared = Arc<Mutex<Model>>;
+ 
+-enum Command { Menu(Vec<TrayItem>), Tooltip(String) }
++enum Command { Menu(Vec<TrayItem>), Tooltip(String), Icon(super::super::TrayIcon) }
+ pub(super) struct Native { commands: Option<UnboundedSender<Command>>, worker: Option<JoinHandle<()>> }
+ 
+ fn backend(e: impl std::fmt::Display) -> TrayError { TrayError::Backend(e.to_string()) }
+ 
+ /// ARGB32 in network byte order, as the spec's `IconPixmap` wants.
+-fn pixmaps(spec: &TraySpec) -> Pixmaps {
+-    let argb = spec.icon.rgba.chunks_exact(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
+-    vec![(spec.icon.width as i32, spec.icon.height as i32, argb)]
++fn pixmap_of(icon: &super::super::TrayIcon) -> Pixmaps {
++    let argb = icon.rgba.chunks_exact(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
++    vec![(icon.width as i32, icon.height as i32, argb)]
+ }
++fn pixmaps(spec: &TraySpec) -> Pixmaps { pixmap_of(&spec.icon) }
+ 
+ /// Menu ids are the item's position plus one; 0 is the root.
+ fn properties(menu: &[TrayItem], id: i32) -> HashMap<String, OwnedVariant> {
+@@ -92,6 +93,8 @@ impl Item {
+     fn menu(&self) -> OwnedObjectPath { OwnedObjectPath::try_from(MENU_PATH).expect("MENU_PATH is an object path") }
+     #[zbus(signal)]
+     async fn new_tool_tip(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
++    #[zbus(signal)]
++    async fn new_icon(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+ }
+ 
+ struct Menu { model: Shared, on_event: Handler }
+@@ -191,6 +194,10 @@ impl Native {
+                                     model.lock().unwrap().tooltip = tooltip;
+                                     if let Ok(emitter) = SignalEmitter::new(&conn, ITEM_PATH) { let _ = Item::new_tool_tip(&emitter).await; }
+                                 }
++                                Command::Icon(icon) => {
++                                    model.lock().unwrap().pixmaps = pixmap_of(&icon);
++                                    if let Ok(emitter) = SignalEmitter::new(&conn, ITEM_PATH) { let _ = Item::new_icon(&emitter).await; }
++                                }
+                             }
+                         }
+                         changed = owners.next() => {
+@@ -216,6 +223,9 @@ impl Native {
+     pub(super) fn set_tooltip(&self, tooltip: String) {
+         if let Some(c) = &self.commands { let _ = c.send(Command::Tooltip(tooltip)); }
+     }
++    pub(super) fn set_icon(&self, icon: super::super::TrayIcon) {
++        if let Some(c) = &self.commands { let _ = c.send(Command::Icon(icon)); }
++    }
+ }
+ 
+ impl Drop for Native {
+diff --git a/crates/rune/src/tray/win32.rs b/crates/rune/src/tray/win32.rs
+index 8d7a72a..55c29d3 100644
+--- a/crates/rune/src/tray/win32.rs
++++ b/crates/rune/src/tray/win32.rs
+@@ -173,6 +173,7 @@ impl Native {
+     }
+     pub(super) fn set_menu(&self, menu: Vec<TrayItem>) { self.model.lock().unwrap().menu = menu; }
+     pub(super) fn set_tooltip(&self, tooltip: String) { self.model.lock().unwrap().tooltip = tooltip; self.update(); }
++    pub(super) fn set_icon(&self, icon: super::super::TrayIcon) { let _ = icon; }
+ }
+ 
+ /// The windows of the trays alive now, so a fast exit can take their icons off the

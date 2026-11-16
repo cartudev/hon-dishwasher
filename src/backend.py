@@ -696,6 +696,17 @@ def cached_inspect() -> dict[str, Any]:
     return state
 
 
+def estimated_minutes(command: Any) -> int | None:
+    """Program duration from the category (`remainingTime`), not the live clock."""
+    parameter = (getattr(command, "parameters", {}) or {}).get("remainingTime")
+    if parameter is None:
+        return None
+    raw = str(getattr(parameter, "value", "")).strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return None
+
+
 def select_start_category(appliance: Any, start: Any, program_code: str) -> Any:
     """Switch startProgram to this category and return that command.
 
@@ -770,7 +781,15 @@ async def start_program(program_id: str, basket: str) -> dict[str, Any]:
         accepted = await selected.send()
         if not accepted:
             raise AppError("hOn no aceptó el comando de inicio.", "command_rejected")
-        return {"ok": True, "sent": True, "program": program["label"], "basket": basket}
+        return {
+            "ok": True,
+            "sent": True,
+            "program": program["label"],
+            "basket": basket,
+            # The program card's fixed remainingTime is the estimate. The appliance
+            # often has no remainingTimeMM until a later query.
+            "estimated_minutes": estimated_minutes(selected),
+        }
     finally:
         await hon.__aexit__(None, None, None)
 

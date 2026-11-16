@@ -20,6 +20,11 @@ fi
 if ! grep -qi "part of the veto" vendor/rune/vendor/winit/src/platform_impl/linux/wayland/window/state.rs 2>/dev/null; then
   git -C vendor/rune apply "$PWD/patches/winit-request-inner-size.patch" && echo "Parches de Wayland aplicados"
 fi
+# Tray icon can be replaced at runtime (the send spinner). Fresh clones need this;
+# an already-patched tree is left alone.
+if ! grep -q "fn set_icon" vendor/rune/crates/rune/src/tray.rs 2>/dev/null; then
+  git -C vendor/rune apply "$PWD/patches/tray-set-icon.patch" && echo "Parche del icono de bandeja aplicado"
+fi
 
 if [ ! -x .venv/bin/python ]; then
   python3 -m venv .venv

@@ -55,6 +55,12 @@ pub struct State {
     pub remaining_new: bool,
     pub landed_at: f64,
     pub countdown: String,
+    /// A start is in flight: the window is hidden and the tray icon spins until hOn answers.
+    pub sending: bool,
+    pub spin_frame: u8,
+    pub spin_at: f64,
+    /// Minutes from the program card, kept if the follow-up query has no clock yet.
+    pub held_estimate: Option<u32>,
 }
 
 impl State {
@@ -74,6 +80,10 @@ impl State {
             remaining_new: false,
             landed_at: 0.0,
             countdown: String::new(),
+            sending: false,
+            spin_frame: 0,
+            spin_at: 0.0,
+            held_estimate: None,
         }
     }
 

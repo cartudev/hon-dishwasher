@@ -1,6 +1,6 @@
-//! App Rune nativa (widget flotante con icono en la bandeja) para el lavavajillas
-//! Candy CF 6C4F1PS-12 dishwasher via hOn. No operation is sent without the
-//! Start sends from the program screen. Stopping still requires "DETENER".
+//! Tray widget for a Candy CF 6C4F1PS-12 via hOn.
+//! A tray click opens the window; the next click hides it. Starting a cycle hides
+//! the window and spins the tray icon until hOn answers.
 
 mod backend;
 mod model;
@@ -10,7 +10,104 @@ mod ui;
 use rune::tray::{TrayEvent, TrayIcon, TrayItem, TraySpec};
 use rune::{App, AppSpec, Key, KeyEvent, TextEdit, Tx};
 use state::{Basket, Screen, State};
+use std::sync::Mutex;
 use ui::view;
+
+const ICON: u32 = 64;
+static TRAY: Mutex<Option<rune::Tray>> = Mutex::new(None);
+
+fn base_pixels() -> &'static [u8] {
+    include_bytes!("../assets/icon.rgba")
+}
+
+fn scaled_icon() -> Vec<u8> {
+    let src = base_pixels();
+    let mut out = vec![0u8; (ICON * ICON * 4) as usize];
+    for y in 0..32 {
+        for x in 0..32 {
+            let s = (y * 32 + x) * 4;
+            for dy in 0..2 {
+                for dx in 0..2 {
+                    let d = ((y * 2 + dy) * ICON as usize + x * 2 + dx) * 4;
+                    out[d..d + 4].copy_from_slice(&src[s..s + 4]);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn idle_icon() -> TrayIcon {
+    TrayIcon::rgba(ICON, ICON, scaled_icon())
+}
+
+/// A small arc in a corner disc, not dots painted over the dishwasher.
+fn spin_icon(frame: u8) -> TrayIcon {
+    let mut pixels = scaled_icon();
+    let (cx, cy, radius) = (48.0, 48.0, 10.5);
+    for y in 34..64 {
+        for x in 34..64 {
+            let dx = x as f32 + 0.5 - cx;
+            let dy = y as f32 + 0.5 - cy;
+            let distance = (dx * dx + dy * dy).sqrt();
+            if distance > 13.2 {
+                continue;
+            }
+            let i = (y * ICON as usize + x) * 4;
+            pixels[i] = 14;
+            pixels[i + 1] = 15;
+            pixels[i + 2] = 19;
+            pixels[i + 3] = 255;
+        }
+    }
+    let start = frame as f32 / 8.0 * std::f32::consts::TAU;
+    let sweep = 1.7;
+    for y in 34..64 {
+        for x in 34..64 {
+            let dx = x as f32 + 0.5 - cx;
+            let dy = y as f32 + 0.5 - cy;
+            let distance = (dx * dx + dy * dy).sqrt();
+            let ring = (distance - radius).abs();
+            if ring > 1.8 {
+                continue;
+            }
+            let mut delta = dy.atan2(dx) - start;
+            delta = delta.rem_euclid(std::f32::consts::TAU);
+            if delta > sweep {
+                continue;
+            }
+            let cover = ((1.8 - ring) / 1.8).clamp(0.0, 1.0) * (1.0 - delta / sweep * 0.25);
+            let i = (y * ICON as usize + x) * 4;
+            pixels[i] = (255.0 * cover + pixels[i] as f32 * (1.0 - cover)) as u8;
+            pixels[i + 1] = (186.0 * cover + pixels[i + 1] as f32 * (1.0 - cover)) as u8;
+            pixels[i + 2] = (92.0 * cover + pixels[i + 2] as f32 * (1.0 - cover)) as u8;
+            pixels[i + 3] = 255;
+        }
+    }
+    TrayIcon::rgba(ICON, ICON, pixels)
+}
+
+fn with_tray(f: impl FnOnce(&rune::Tray)) {
+    if let Ok(guard) = TRAY.lock() {
+        if let Some(tray) = guard.as_ref() {
+            f(tray);
+        }
+    }
+}
+
+fn show_spin(frame: u8) {
+    with_tray(|tray| {
+        tray.set_icon(spin_icon(frame));
+        tray.set_tooltip("Enviando el programa…");
+    });
+}
+
+fn show_idle() {
+    with_tray(|tray| {
+        tray.set_icon(idle_icon());
+        tray.set_tooltip("Candy — Lavavajillas · hOn");
+    });
+}
 
 /// Last query's cache + live query. The list shows instantly from the cache and
 /// the fresh state replaces it afterwards.
@@ -41,7 +138,20 @@ fn inspect(me: rune::AppHandle<State>, with_cache: bool) {
         me.update(move |s, tx| {
             s.busy = false;
             match result {
-                Ok(snapshot) => {
+                Ok(mut snapshot) => {
+                    let reported = snapshot
+                        .remaining_time
+                        .as_deref()
+                        .and_then(|value| value.trim().parse::<u32>().ok())
+                        .filter(|minutes| *minutes > 0);
+                    if reported.is_none() {
+                        if let Some(held) = s.held_estimate {
+                            snapshot.remaining_time = Some(held.to_string());
+                            snapshot.running = true;
+                        }
+                    } else {
+                        s.held_estimate = None;
+                    }
                     s.snapshot = Some(snapshot);
                     s.remaining_new = true;
                     s.status = "Equipo consultado · solo lectura".to_string();
@@ -78,6 +188,16 @@ fn poll(s: &mut State, clock: f64, tx: &mut Tx) -> bool {
         }
         // A wake once a minute keeps the countdown going while the window sits idle.
         tx.wake_at(clock + 30.0);
+    }
+    if s.sending {
+        if s.spin_at == 0.0 {
+            s.spin_at = clock;
+        } else if clock - s.spin_at >= 0.08 {
+            s.spin_frame = (s.spin_frame + 1) % 8;
+            s.spin_at = clock;
+            show_spin(s.spin_frame);
+        }
+        tx.wake_at(clock + 0.08);
     }
     dirty
 }
@@ -160,7 +280,13 @@ fn start_cycle(s: &mut State) {
     let label = info.label.clone();
     let program = s.selected.clone();
     s.busy = true;
+    s.sending = true;
+    s.spin_frame = 0;
+    s.spin_at = 0.0;
     s.status = format!("Enviando el inicio de {label}…");
+    s.me.hide();
+    show_spin(0);
+    s.me.wake();
     let me = s.me.clone();
     let basket = s.basket;
     let _ = rune::task::spawn("hon-start", move || {
@@ -168,15 +294,37 @@ fn start_cycle(s: &mut State) {
         let refresh = me.clone();
         me.update(move |s, tx| {
             s.busy = false;
+            s.sending = false;
             s.confirmation.clear();
+            show_idle();
             match result {
-                Ok(_) => {
-                    s.status = format!("hOn aceptó el inicio de {label}.");
+                Ok(payload) => {
+                    let minutes = payload
+                        .get("estimated_minutes")
+                        .and_then(|value| value.as_u64().map(|n| n as u32).or_else(|| value.as_str().and_then(|text| text.parse().ok())))
+                        .filter(|minutes| *minutes > 0);
+                    if let Some(minutes) = minutes {
+                        s.held_estimate = Some(minutes);
+                        if let Some(snapshot) = s.snapshot.as_mut() {
+                            snapshot.running = true;
+                            snapshot.program = Some(label.clone());
+                            snapshot.remaining_time = Some(minutes.to_string());
+                        }
+                        s.remaining_new = true;
+                        s.countdown = format!("Quedan {minutes} min");
+                        with_tray(|tray| tray.set_tooltip(format!("{label} · quedan {minutes} min")));
+                        s.status = format!("hOn aceptó {label}. Quedan {minutes} min.");
+                    } else {
+                        s.status = format!("hOn aceptó el inicio de {label}.");
+                    }
                     state::go(s, Screen::Home, tx);
                     s.basket = Basket::Off;
                     inspect(refresh, false);
                 }
-                Err(error) => s.status = error,
+                Err(error) => {
+                    s.status = error;
+                    s.me.open();
+                }
             }
         });
     });
@@ -258,12 +406,15 @@ fn build_tray(handle: rune::AppHandle<State>) -> rune::Tray {
     let menu = handle.clone();
     rune::Tray::new(spec, move |event| match event {
         TrayEvent::Activate { token } => {
-            match token {
-                Some(token) if !token.is_empty() => click.activate(token),
-                _ => click.open(),
+            if click.is_visible() {
+                click.hide();
+            } else {
+                match token {
+                    Some(token) if !token.is_empty() => click.activate(token),
+                    _ => click.open(),
+                }
+                click.update(|s, _| state::reapply_size(s));
             }
-            // Tras reabrir (o enfocar), la altura vuelve a la de la pantalla activa.
-            click.update(|s, _| state::reapply_size(s));
         }
         TrayEvent::Menu(id) => match id.as_str() {
             "open" => {
@@ -360,7 +511,9 @@ fn main() {
         app = app.windowless();
     }
     let boot = app.handle();
-    let _tray = build_tray(boot.clone());
+    if let Ok(mut slot) = TRAY.lock() {
+        *slot = Some(build_tray(boot.clone()));
+    }
     if !headless {
         inspect(boot, true);
     }
