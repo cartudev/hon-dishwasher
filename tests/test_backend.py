@@ -248,6 +248,56 @@ class ChoicesTests(unittest.TestCase):
         self.assertTrue(backend.program_visible("intensive"))
 
 
+class RemoteAndCategoryTests(unittest.TestCase):
+    def test_remote_ready_is_the_machine_button_not_the_ui_flags(self):
+        class Appliance:
+            def __init__(self, data):
+                self.data = data
+
+            def get(self, key, default=None):
+                return self.data.get(key, default)
+
+        ready = Appliance({"remoteCtrValid": "1", "remoteActionable": "0", "remoteVisible": "0"})
+        self.assertTrue(backend.remote_control_on(ready))
+        ready.data["remoteCtrValid"] = "0"
+        self.assertFalse(backend.remote_control_on(ready))
+
+    def test_prewash_is_selected_by_category_not_prcode(self):
+        class HonParameterProgram:
+            def __init__(self, appliance, categories):
+                self._appliance = appliance
+                self._categories = categories
+
+            @property
+            def value(self):
+                return ""
+
+            @value.setter
+            def value(self, code):
+                self._appliance.commands["startProgram"] = self._categories[code]
+
+        class Command:
+            def __init__(self, category):
+                self.category = category
+
+        class Appliance:
+            def __init__(self):
+                self.commands = {}
+
+        appliance = Appliance()
+        intensive = Command("intensive")
+        prewash = Command("prewash")
+        start = Command("intensive")
+        start.categories = {"intensive": intensive, "prewash": prewash}
+        start.available_settings = {
+            "prCode": Parameter(["2", "12"]),
+            "category": HonParameterProgram(appliance, start.categories),
+        }
+        appliance.commands["startProgram"] = intensive
+        selected = backend.select_start_category(appliance, start, "prewash")
+        self.assertIs(selected, prewash)
+
+
 class CacheTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()

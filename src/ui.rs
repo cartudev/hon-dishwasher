@@ -61,7 +61,6 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
                 .child(match s.screen {
                     Screen::Home => home(s, t, accent),
                     Screen::Profile => profile_screen(s, t, accent, kit),
-                    Screen::Review => review(s, t, accent),
                     Screen::Config => config(s, t, accent, kit),
                     Screen::Stop => stop_screen(s, t, accent),
                 }),
@@ -368,107 +367,7 @@ fn profile_screen(s: &State, t: Theme, accent: Color, kit: &Kit) -> El {
                 .key("profile-actions")
                 .gap(space::S2)
                 .child(action("back", "Volver", t, true, false, accent, |s, tx| state::go(s, Screen::Home, tx)))
-                .child(action(
-                    "review",
-                    "Revisar…",
-                    t,
-                    available,
-                    true,
-                    accent,
-                    |s, tx| state::go(s, Screen::Review, tx),
-                )),
-        )
-}
-
-fn review(s: &State, t: Theme, accent: Color) -> El {
-    let id = s.selected.clone();
-    let info = s.profile_info(&id);
-    let label = info.map(|i| i.label.clone()).unwrap_or_else(|| id.clone());
-    let remote_ready = s.snapshot.as_ref().is_some_and(|x| x.remote_ready);
-    let options = info
-        .map(|i| i.required.iter().filter(|o| o.enabled).map(|o| o.label.clone()).collect::<Vec<_>>().join(" · "))
-        .unwrap_or_default();
-    let code = info
-        .and_then(|i| i.code.clone())
-        .unwrap_or_else(|| "no confirmado".to_string());
-    let confirmed = s.confirmation.text.trim() == "INICIAR";
-    col()
-        .key("review")
-        .gap(space::S3)
-        .child(
-            text("REVISIÓN — TODAVÍA NO SE ENVIÓ NADA")
-                .key("rtitle")
-                .font(type_::SECTION)
-                .color(t.text_secondary),
-        )
-        .child(
-            col()
-                .key("summary")
-                .padding(space::S3)
-                .gap(space::S1)
-                .fill(t.card)
-                .radius(radius::LG)
-                .border(1.0, t.card_border)
-                .child(text(format!("Programa: {label} ({code})")).key("sum-program").font(type_::BODY).color(t.text))
-                .child(text(format!("Opciones: {options}")).key("sum-options").font(type_::BODY).color(t.text))
-                .child(text(format!("Media carga: {}", s.basket.label())).key("sum-basket").font(type_::BODY).color(t.text))
-                .child(
-                    text(format!("Control remoto: {}", if remote_ready { "listo" } else { "no verificado / no listo" }))
-                        .key("sum-remote")
-                        .font(type_::BODY)
-                        .color(t.text),
-                )
-                .child(text(s.door_text()).key("sum-door").font(type_::BODY).color(t.text)),
-        )
-        .child(
-            text("Comprobá que el equipo esté cargado, con detergente y la puerta cerrada. Al enviar, la app revalida el esquema y el estado contra hOn.")
-                .key("warn")
-                .w_full()
-                .wrap()
-                .font(type_::LABEL)
-                .color(t.text_secondary),
-        )
-        .child(
-            col()
-                .key("confirm-field")
-                .gap(4.0)
-                .child(
-                    text("Para habilitar el envío, escribí INICIAR en el campo")
-                        .key("confirm-label")
-                        .font(type_::LABEL)
-                        .color(t.text_secondary),
-                )
-                .child(
-                    field_shell(
-                        "confirm-shell",
-                        text_input(&s.confirmation, type_::BODY)
-                            .key("confirmation")
-                            .single_line()
-                            .w_full()
-                            .color(t.text)
-                            .label("Confirmación INICIAR")
-                            .on_edit(|s: &mut State| &mut s.confirmation),
-                        t,
-                    ),
-                ),
-        )
-        .child(
-            row()
-                .key("review-actions")
-                .gap(space::S2)
-                .child(action(
-                    "cancel",
-                    "Cancelar",
-                    t,
-                    true,
-                    false,
-                    accent,
-                    |s, tx| {
-                        state::go(s, Screen::Profile, tx);
-                        s.confirmation.clear();
-                    },
-                ))
-                .child(action("start", "Iniciar ciclo", t, confirmed, true, accent, |s, _| crate::start_cycle(s))),
+                .child(action("start", "Iniciar ciclo", t, available, true, accent, |s, _| crate::start_cycle(s))),
         )
 }
 

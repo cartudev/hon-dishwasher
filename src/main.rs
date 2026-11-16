@@ -1,6 +1,6 @@
 //! App Rune nativa (widget flotante con icono en la bandeja) para el lavavajillas
 //! Candy CF 6C4F1PS-12 dishwasher via hOn. No operation is sent without the
-//! explicit "INICIAR" confirmation on the review screen.
+//! Start sends from the program screen. Stopping still requires "DETENER".
 
 mod backend;
 mod model;
@@ -150,14 +150,17 @@ fn refresh(s: &mut State) {
 }
 
 fn start_cycle(s: &mut State) {
-    if s.busy || s.confirmation.text.trim() != "INICIAR" {
+    if s.busy {
         return;
     }
     let Some(info) = s.selected_info() else { return };
+    if !info.available {
+        return;
+    }
     let label = info.label.clone();
     let program = s.selected.clone();
     s.busy = true;
-    s.status = "Revalidando opciones y preparando el inicio…".to_string();
+    s.status = format!("Enviando el inicio de {label}…");
     let me = s.me.clone();
     let basket = s.basket;
     let _ = rune::task::spawn("hon-start", move || {
@@ -213,18 +216,12 @@ fn save_credentials(s: &mut State) {
     .ok();
 }
 
-/// Escape goes back; review discards what was typed so no INICIAR is left armed.
+/// Escape goes back; from home it hides the window to the tray.
 fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     if event.key != Key::Escape {
         return false;
     }
-    // Escape goes back; from the home screen it hides the window to the tray (the app stays alive).
     match s.screen {
-        Screen::Review => {
-            state::go(s, Screen::Profile, tx);
-            s.confirmation.clear();
-            true
-        }
         Screen::Stop => {
             state::go(s, Screen::Home, tx);
             s.confirmation.clear();
@@ -312,13 +309,6 @@ fn main() {
             ("profile", |s| {
                 s.snapshot = Some(model::sample());
                 s.screen = Screen::Profile;
-                s.busy = false;
-                s.status = "Equipo consultado · solo lectura".to_string();
-                s.reconcile_selection();
-            }),
-            ("review", |s| {
-                s.snapshot = Some(model::sample());
-                s.screen = Screen::Review;
                 s.busy = false;
                 s.status = "Equipo consultado · solo lectura".to_string();
                 s.reconcile_selection();

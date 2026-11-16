@@ -8,7 +8,6 @@ use crate::model::{ProfileInfo, Snapshot};
 pub enum Screen {
     Home,
     Profile,
-    Review,
     Config,
     Stop,
 }
@@ -163,7 +162,6 @@ pub fn screen_size(screen: Screen) -> (f32, f32) {
     let height = match screen {
         Screen::Home => 320.0,
         Screen::Profile => 390.0,
-        Screen::Review => 430.0,
         Screen::Config => 450.0,
         Screen::Stop => 340.0,
     };
@@ -176,9 +174,6 @@ pub fn screen_size(screen: Screen) -> (f32, f32) {
 /// landed displaced ("above") right when entering program/settings.
 pub fn go(s: &mut State, screen: Screen, tx: &mut Tx) {
     s.screen = screen;
-    if screen == Screen::Review {
-        s.confirmation.clear();
-    }
     tx.instant();
 }
 

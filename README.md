@@ -10,7 +10,7 @@ A system tray widget (Rune, native GPU window) for controlling a
 |---|---|
 | ![Home with cycle in progress](docs/screenshots/inicio-ciclo.png) | ![Program](docs/screenshots/programa.png) |
 
-| Review (requires `INICIAR`) | Settings | Stop (requires `DETENER`) |
+| Program (starts directly) | Settings | Stop (requires `DETENER`) |
 |---|---|---|
 | ![Review](docs/screenshots/revision.png) | ![Settings](docs/screenshots/configuracion.png) | ![Stop](docs/screenshots/detener.png) |
 
@@ -18,8 +18,10 @@ A system tray widget (Rune, native GPU window) for controlling a
 - Floating **widget-sized** window: height follows the content per screen.
 - **Autostart** with the graphical session (systemd --user); closing the window
   keeps the app alive in the tray, `Escape` hides it back there.
-- Nothing is sent without typing **`INICIAR`** on the review screen, and stopping
-  requires **`DETENER`**; both run on a background task and never block the UI.
+- **Iniciar ciclo** sends from the program screen. Stopping still requires
+  typing **`DETENER`**. Both run in the background and revalidate the live
+  schema first. Remote control is `remoteCtrValid` only: this Candy leaves
+  `remoteActionable` and `remoteVisible` off even when the official app can start.
 - Shows the **remaining time** the appliance reported on its last query,
   discounted by the local clock (no live sync; *Refresh* fetches a fresh value).
 
